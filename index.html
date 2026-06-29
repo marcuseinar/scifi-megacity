@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>MEGACITY 3000</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:'Courier New',monospace;touch-action:none}
+canvas#c{display:block;position:fixed;inset:0;width:100%!important;height:100%!important}
+
+#load{position:fixed;inset:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;gap:16px}
+#load h1{font-size:clamp(24px,6vw,48px);letter-spacing:8px;color:#00ffff;text-shadow:0 0 40px #00ffff,0 0 80px #0088ff;animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}}
+#load-sub{font-size:11px;letter-spacing:6px;color:#446688}
+#lbar-bg{width:min(320px,80vw);height:2px;background:rgba(0,255,255,.15);border-radius:2px}
+#lbar{height:100%;background:#00ffff;box-shadow:0 0 12px #00ffff;border-radius:2px;width:0;transition:width .3s}
+#ltxt{font-size:10px;letter-spacing:3px;color:#335566;min-height:14px}
+#enter-btn{display:none;margin-top:12px;padding:12px 40px;background:transparent;border:1px solid #00ffff;color:#00ffff;font-family:'Courier New',monospace;font-size:13px;letter-spacing:4px;cursor:pointer;text-transform:uppercase;box-shadow:0 0 20px rgba(0,255,255,.3);transition:all .2s}
+#enter-btn:hover,#enter-btn:active{background:rgba(0,255,255,.1);box-shadow:0 0 40px rgba(0,255,255,.5)}
+
+/* HUD */
+#hud{position:fixed;inset:0;pointer-events:none;z-index:10}
+#mode-disp{position:absolute;top:20px;left:50%;transform:translateX(-50%);color:#00ffff;font-size:11px;letter-spacing:5px;text-shadow:0 0 12px #00ffff;background:rgba(0,0,0,.5);padding:5px 16px;border:1px solid rgba(0,255,255,.25)}
+#spd{position:absolute;bottom:200px;right:20px;color:#ff6600;font-size:20px;text-shadow:0 0 10px #ff6600;text-align:right;line-height:1}
+#spd small{font-size:9px;letter-spacing:2px;display:block;opacity:.7}
+#cross{position:absolute;top:50%;left:50%;width:12px;height:12px;transform:translate(-50%,-50%)}
+#cross::before,#cross::after{content:'';position:absolute;background:rgba(0,255,255,.5)}
+#cross::before{width:1px;height:100%;left:50%;top:0}
+#cross::after{width:100%;height:1px;top:50%;left:0}
+#help-txt{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);font-size:9px;letter-spacing:2px;color:rgba(0,255,255,.35);white-space:nowrap;pointer-events:none}
+
+/* Minimap */
+#map{position:fixed;top:16px;right:16px;width:110px;height:110px;border:1px solid rgba(0,255,255,.3);background:rgba(0,0,0,.75);z-index:11;pointer-events:none}
+#map canvas{width:100%;height:100%}
+
+/* Touch joysticks */
+.jstick{position:fixed;bottom:90px;width:110px;height:110px;pointer-events:all;z-index:20;touch-action:none}
+#lj{left:24px}
+#rj{right:24px}
+.jbase{width:100%;height:100%;border-radius:50%;background:rgba(0,255,255,.06);border:1.5px solid rgba(0,255,255,.25);position:relative}
+.jknob{position:absolute;width:38px;height:38px;border-radius:50%;background:rgba(0,255,255,.35);border:1.5px solid rgba(0,255,255,.7);top:50%;left:50%;transform:translate(-50%,-50%);box-shadow:0 0 14px rgba(0,255,255,.4)}
+
+/* Mode buttons */
+#mbts{position:fixed;bottom:220px;right:24px;display:flex;flex-direction:column;gap:8px;pointer-events:all;z-index:20}
+.mb{width:58px;height:36px;background:rgba(0,0,0,.7);border:1px solid rgba(0,255,255,.3);color:rgba(0,255,255,.6);font-family:'Courier New',monospace;font-size:9px;letter-spacing:2px;cursor:pointer;text-transform:uppercase}
+.mb.on{background:rgba(0,255,255,.15);border-color:#00ffff;color:#00ffff;box-shadow:0 0 10px rgba(0,255,255,.3)}
+
+/* Vertical buttons for fly */
+#vbts{position:fixed;bottom:90px;right:150px;display:flex;flex-direction:column;gap:8px;pointer-events:all;z-index:20}
+.vb{width:44px;height:44px;background:rgba(0,0,0,.7);border:1px solid rgba(255,100,0,.3);color:rgba(255,100,0,.7);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+
+/* Scan line overlay */
+#scan{position:fixed;inset:0;pointer-events:none;z-index:5;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px)}
+</style>
+</head>
+<body>
+
+<div id="load">
+  <h1>MEGACITY 3000</h1>
+  <div id="load-sub">NEURAL NETWORK CITY SIM</div>
+  <div id="lbar-bg"><div id="lbar"></div></div>
+  <div id="ltxt">BOOTING...</div>
+  <button id="enter-btn">ENTER MEGACITY</button>
+</div>
+
+<canvas id="c"></canvas>
+<div id="scan"></div>
+
+<div id="hud">
+  <div id="mode-disp">FOOT</div>
+  <div id="cross"></div>
+  <div id="spd">0<small>KM/H</small></div>
+  <div id="help-txt">WASD / JOYSTICK = MOVE &nbsp;|&nbsp; MOUSE / RIGHT-STICK = LOOK &nbsp;|&nbsp; 1=FOOT 2=CAR 3=FLY</div>
+</div>
+
+<div id="map"><canvas id="map-c" width="110" height="110"></canvas></div>
+
+<div class="jstick" id="lj"><div class="jbase"><div class="jknob" id="lk"></div></div></div>
+<div class="jstick" id="rj"><div class="jbase"><div class="jknob" id="rk"></div></div></div>
+
+<div id="mbts">
+  <button class="mb on" data-m="foot">FOOT</button>
+  <button class="mb" data-m="car">CAR</button>
+  <button class="mb" data-m="fly">FLY</button>
+</div>
+
+<div id="vbts">
+  <button class="vb" id="upb">▲</button>
+  <button class="vb" id="dnb">▼</button>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.158.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.158.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
+const GRID=10, BLOCK=80, ROAD=28, CELL=BLOCK+ROAD;
+const CITY=GRID*CELL, HALF=CITY/2;
+const NEONS=[0x00ffff,0xff00ff,0xff6600,0x00ff88,0xff0066,0xaa00ff,0xffff00];
+const BCOLORS=[0x0d1830,0x0a1428,0x111a30,0x080e1f,0x141f35,0x0f1525];
+const SIGNS=['NOODLES','CYBER CAFE','IMPLANTS','DATA HAVEN','SYNTH BAR','MEGACORP',
+             'UPLOAD','REBOOT','NEXUS','GRIDLINK','网络城市','VOID','CHROME',
+             'NEON DISTRICT','JACK IN','FLATLINE','WETWARE','NEUROLINK'];
+
+// ─── RENDERER / SCENE / CAMERA ───────────────────────────────────────────────
+const canvas=document.getElementById('c');
+const W=()=>window.innerWidth, H=()=>window.innerHeight;
+
+const renderer=new THREE.WebGLRenderer({canvas,antialias:window.devicePixelRatio<2,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(W(),H());
+renderer.shadowMap.enabled=false; // disabled for perf
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.0;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x000a1a,0.003);
+
+const camera=new THREE.PerspectiveCamera(72,W()/H(),0.5,1800);
+
+// ─── POST PROCESSING ─────────────────────────────────────────────────────────
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+const bloom=new UnrealBloomPass(new THREE.Vector2(W(),H()),1.2,0.4,0.5);
+composer.addPass(bloom);
+
+// ─── WINDOW TEXTURES (pool of 6) ─────────────────────────────────────────────
+const WIN_TEX=Array.from({length:6},()=>{
+  const c=document.createElement('canvas'); c.width=64; c.height=128;
+  const x=c.getContext('2d');
+  x.fillStyle='#050a18'; x.fillRect(0,0,64,128);
+  for(let r=0;r<16;r++) for(let col=0;col<8;col++){
+    if(Math.random()>.32){
+      const v=Math.random();
+      x.fillStyle=v<.5?'#8aaeff':v<.75?'#ffd080':'#88ffe8';
+      x.fillRect(col*8+1,r*8+1,6,6);
+    }
+  }
+  const t=new THREE.CanvasTexture(c);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping;
+  return t;
+});
+
+function rnd(a,b){return a+Math.random()*(b-a)}
+function pick(arr){return arr[Math.floor(Math.random()*arr.length)]}
+
+// ─── NEON SIGN TEXTURE ────────────────────────────────────────────────────────
+function makeSignTex(text,col){
+  const c=document.createElement('canvas'); c.width=256; c.height=64;
+  const x=c.getContext('2d');
+  const h='#'+col.toString(16).padStart(6,'0');
+  x.fillStyle='#000'; x.fillRect(0,0,256,64);
+  x.font='bold 28px monospace';
+  x.textAlign='center'; x.textBaseline='middle';
+  x.shadowColor=h; x.shadowBlur=20;
+  x.fillStyle=h;
+  x.fillText(text,128,32);
+  x.shadowBlur=6; x.fillText(text,128,32);
+  return new THREE.CanvasTexture(c);
+}
+
+// ─── SKY ─────────────────────────────────────────────────────────────────────
+(()=>{
+  const geo=new THREE.SphereGeometry(1600,24,24);
+  const mat=new THREE.ShaderMaterial({
+    uniforms:{top:{value:new THREE.Color(0x000208)},bot:{value:new THREE.Color(0x001030)}},
+    vertexShader:`varying vec3 vp;void main(){vp=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+    fragmentShader:`uniform vec3 top,bot;varying vec3 vp;void main(){float h=normalize(vp).y*.5+.5;gl_FragColor=vec4(mix(bot,top,h*h),1.);}`,
+    side:THREE.BackSide
+  });
+  scene.add(new THREE.Mesh(geo,mat));
+})();
+
+// Stars
+(()=>{
+  const n=1800,pos=new Float32Array(n*3);
+  for(let i=0;i<n;i++){
+    const t=Math.random()*Math.PI*2,p=Math.acos(Math.random());
+    const r=1400;
+    pos[i*3]=r*Math.sin(p)*Math.cos(t);
+    pos[i*3+1]=Math.abs(r*Math.cos(p));
+    pos[i*3+2]=r*Math.sin(p)*Math.sin(t);
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xffffff,size:1.5,sizeAttenuation:false})));
+})();
+
+// ─── LIGHTING ─────────────────────────────────────────────────────────────────
+scene.add(new THREE.AmbientLight(0x112244,0.6));
+const moon=new THREE.DirectionalLight(0x334488,0.9);
+moon.position.set(200,400,100); scene.add(moon);
+scene.add(new THREE.HemisphereLight(0x001a44,0x000408,0.5));
+
+// A few large soft colored fills
+[[0x004499,200,200],[0x990044,-200,200],[0x004422,0,-200]].forEach(([col,x,z])=>{
+  const l=new THREE.PointLight(col,0.8,600);
+  l.position.set(x,80,z); scene.add(l);
+});
+
+// ─── GROUND ──────────────────────────────────────────────────────────────────
+const ground=new THREE.Mesh(
+  new THREE.PlaneGeometry(CITY+400,CITY+400),
+  new THREE.MeshStandardMaterial({color:0x0a0e18,roughness:0.4,metalness:0.6})
+);
+ground.rotation.x=-Math.PI/2; scene.add(ground);
+
+// Road grid lines
+const lmat=new THREE.MeshBasicMaterial({color:0x1a2a40});
+for(let i=0;i<=GRID;i++){
+  const p=-HALF+i*CELL;
+  const hg=new THREE.Mesh(new THREE.PlaneGeometry(CITY,3),lmat);
+  hg.rotation.x=-Math.PI/2; hg.position.set(0,.05,p); scene.add(hg);
+  const vg=new THREE.Mesh(new THREE.PlaneGeometry(3,CITY),lmat);
+  vg.rotation.x=-Math.PI/2; vg.position.set(p,.05,0); scene.add(vg);
+}
+
+// ─── CITY GENERATION ─────────────────────────────────────────────────────────
+const neonMeshes=[];   // for animation
+const blinkLights=[];  // antenna blinkers
+
+function addBuilding(bx,bz,bw,bd,bh){
+  const wt=WIN_TEX[Math.floor(Math.random()*WIN_TEX.length)].clone();
+  wt.repeat.set(Math.max(1,Math.round(bw/8)),Math.max(1,Math.round(bh/10)));
+
+  const mat=new THREE.MeshStandardMaterial({
+    color:pick(BCOLORS),
+    emissiveMap:wt,
+    emissive:new THREE.Color(.4,.5,1),
+    emissiveIntensity:.7,
+    roughness:.75,metalness:.25
+  });
+  const mesh=new THREE.Mesh(new THREE.BoxGeometry(bw,bh,bd),mat);
+  mesh.position.set(bx,bh/2,bz);
+  scene.add(mesh);
+
+  // Antenna on tall buildings
+  if(bh>70){
+    const pole=new THREE.Mesh(
+      new THREE.CylinderGeometry(.25,.25,15,6),
+      new THREE.MeshStandardMaterial({color:0x223344,metalness:.8})
+    );
+    pole.position.set(bx,bh+7.5,bz); scene.add(pole);
+
+    const bm=new THREE.Mesh(
+      new THREE.SphereGeometry(.8,8,8),
+      new THREE.MeshBasicMaterial({color:0xff2200})
+    );
+    bm.position.set(bx,bh+16,bz);
+    bm.userData={phase:Math.random()*Math.PI*2,rate:.5+Math.random()*1.5};
+    scene.add(bm); blinkLights.push(bm);
+  }
+
+  // Neon sign
+  if(Math.random()>.45&&bh>18){
+    const col=pick(NEONS);
+    const txt=pick(SIGNS);
+    const stex=makeSignTex(txt,col);
+    const sm=new THREE.Mesh(
+      new THREE.PlaneGeometry(16,4),
+      new THREE.MeshBasicMaterial({map:stex,transparent:true,side:THREE.DoubleSide,depthWrite:false})
+    );
+    const sh=6+Math.random()*(bh-10);
+    const side=Math.floor(Math.random()*4);
+    const off=.3;
+    if(side===0)      sm.position.set(bx,sh,bz+bd/2+off);
+    else if(side===1){sm.position.set(bx,sh,bz-bd/2-off); sm.rotation.y=Math.PI;}
+    else if(side===2){sm.position.set(bx+bw/2+off,sh,bz); sm.rotation.y=-Math.PI/2;}
+    else              {sm.position.set(bx-bw/2-off,sh,bz); sm.rotation.y= Math.PI/2;}
+    sm.userData={col,phase:Math.random()*Math.PI*2};
+    scene.add(sm); neonMeshes.push(sm);
+  }
+}
+
+function generateBlock(gx,gz){
+  const cx=-HALF+gx*CELL+ROAD+BLOCK/2;
+  const cz=-HALF+gz*CELL+ROAD+BLOCK/2;
+
+  if(Math.random()<.06){
+    // Park
+    const pm=new THREE.Mesh(new THREE.PlaneGeometry(BLOCK-4,BLOCK-4),
+      new THREE.MeshStandardMaterial({color:0x081208,roughness:.95}));
+    pm.rotation.x=-Math.PI/2; pm.position.set(cx,.08,cz); scene.add(pm);
+    return;
+  }
+
+  const layouts=[
+    [{x:0,z:0,ws:.85,ds:.85}],
+    [{x:-.22,z:0,ws:.48,ds:.88},{x:.25,z:0,ws:.44,ds:.88}],
+    [{x:-.24,z:-.22,ws:.46,ds:.52},{x:.24,z:-.22,ws:.44,ds:.52},{x:0,z:.24,ws:.88,ds:.44}],
+  ];
+  const lay=layouts[Math.floor(Math.random()*layouts.length)];
+
+  lay.forEach(l=>{
+    const bw=l.ws*BLOCK*(.85+Math.random()*.15);
+    const bd=l.ds*BLOCK*(.85+Math.random()*.15);
+    const bh=10+Math.pow(Math.random(),1.5)*200;
+    addBuilding(cx+l.x*BLOCK*.5,cz+l.z*BLOCK*.5,bw,bd,bh);
+  });
+
+  // Street light (decorative, no point light for perf)
+  if(gx<GRID&&gz<GRID){
+    const lx=cx-BLOCK/2-ROAD/2, lz=cz-BLOCK/2-ROAD/2;
+    const pole=new THREE.Mesh(
+      new THREE.CylinderGeometry(.12,.18,11,8),
+      new THREE.MeshStandardMaterial({color:0x223344,metalness:.8})
+    );
+    pole.position.set(lx,5.5,lz); scene.add(pole);
+    const lamp=new THREE.Mesh(
+      new THREE.SphereGeometry(.5,8,8),
+      new THREE.MeshBasicMaterial({color:0xffddaa})
+    );
+    lamp.position.set(lx+3,11,lz); scene.add(lamp);
+    const arm=new THREE.Mesh(
+      new THREE.CylinderGeometry(.06,.06,3.5,6),
+      new THREE.MeshStandardMaterial({color:0x223344})
+    );
+    arm.rotation.z=Math.PI/2; arm.position.set(lx+1.5,11,lz); scene.add(arm);
+  }
+}
+
+// ─── NPC CARS ─────────────────────────────────────────────────────────────────
+const cars=[];
+function spawnCars(){
+  const ccolors=[0x334466,0x553333,0x335533,0x444455,0x553355,0x224488,0x445544];
+  for(let i=0;i<55;i++){
+    const g=new THREE.Group();
+    const col=pick(ccolors);
+    // Body
+    g.add(Object.assign(new THREE.Mesh(
+      new THREE.BoxGeometry(3.5,1.3,7.5),
+      new THREE.MeshStandardMaterial({color:col,metalness:.7,roughness:.3})
+    ),{position:{x:0,y:0,z:0}}));
+    // Cabin
+    const cab=new THREE.Mesh(
+      new THREE.BoxGeometry(2.8,1.1,3.8),
+      new THREE.MeshStandardMaterial({color:0x112233,metalness:.3,roughness:.1})
+    );
+    cab.position.set(0,1.2,-0.4); g.add(cab);
+    // Headlights
+    [-1.2,1.2].forEach(sx=>{
+      const hl=new THREE.Mesh(new THREE.BoxGeometry(.4,.25,.2),
+        new THREE.MeshBasicMaterial({color:0xffffff}));
+      hl.position.set(sx,0,3.7); g.add(hl);
+    });
+    // Taillights
+    [-1.2,1.2].forEach(sx=>{
+      const tl=new THREE.Mesh(new THREE.BoxGeometry(.4,.25,.2),
+        new THREE.MeshBasicMaterial({color:0xff1100}));
+      tl.position.set(sx,0,-3.7); g.add(tl);
+    });
+
+    g.position.y=1.2;
+    const horiz=Math.random()>.5;
+    const ri=Math.floor(Math.random()*GRID);
+    const rp=-HALF+ri*CELL+ROAD/2+Math.random()*4-2;
+    const sp=(Math.random()-.5)*CITY;
+    const dir=Math.random()>.5?1:-1;
+    const lane=dir*(4+Math.random()*4);
+    if(horiz){
+      g.position.set(sp,1.2,rp+lane);
+      g.rotation.y=dir>0?0:Math.PI;
+      g.userData={axis:'x',spd:(15+Math.random()*25)*dir};
+    }else{
+      g.position.set(rp+lane,1.2,sp);
+      g.rotation.y=dir>0?-Math.PI/2:Math.PI/2;
+      g.userData={axis:'z',spd:(15+Math.random()*25)*dir};
+    }
+    scene.add(g); cars.push(g);
+  }
+}
+
+// ─── DRONES ──────────────────────────────────────────────────────────────────
+const drones=[];
+function spawnDrones(){
+  for(let i=0;i<22;i++){
+    const g=new THREE.Group();
+    g.add(new THREE.Mesh(
+      new THREE.BoxGeometry(2,.4,2),
+      new THREE.MeshStandardMaterial({color:0x223344,metalness:.8})
+    ));
+    [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(([rx,rz])=>{
+      const r=new THREE.Mesh(
+        new THREE.CylinderGeometry(.55,.55,.1,8),
+        new THREE.MeshStandardMaterial({color:0x445566,metalness:.9})
+      );
+      r.position.set(rx,.25,rz); r.userData.rotor=true; g.add(r);
+    });
+    const gl=new THREE.Mesh(
+      new THREE.SphereGeometry(.2,8,8),
+      new THREE.MeshBasicMaterial({color:0x00ff88})
+    );
+    g.add(gl);
+
+    g.position.set(rnd(-HALF,HALF),rnd(35,130),rnd(-HALF,HALF));
+    g.userData={
+      cx:g.position.x, cz:g.position.z,
+      ang:Math.random()*Math.PI*2,
+      spd:rnd(4,14),
+      rad:rnd(20,90),
+      by:g.position.y,
+      bspd:rnd(.4,1.2),
+      bamp:rnd(3,8)
+    };
+    scene.add(g); drones.push(g);
+  }
+}
+
+// Flying cars at mid-altitude
+const flyingCars=[];
+function spawnFlyingCars(){
+  const cols=[0x334466,0x553344,0x334444];
+  for(let i=0;i<20;i++){
+    const g=new THREE.Group();
+    g.add(new THREE.Mesh(
+      new THREE.BoxGeometry(3,1,6.5),
+      new THREE.MeshStandardMaterial({color:pick(cols),metalness:.7})
+    ));
+    // Glowing underside
+    const ul=new THREE.Mesh(
+      new THREE.PlaneGeometry(2,.3),
+      new THREE.MeshBasicMaterial({color:pick([0x00aaff,0xff6600,0x00ffaa]),side:THREE.DoubleSide})
+    );
+    ul.rotation.x=Math.PI/2; ul.position.y=-.6; g.add(ul);
+    // Headlight
+    g.add(Object.assign(new THREE.Mesh(
+      new THREE.BoxGeometry(.6,.3,.2),
+      new THREE.MeshBasicMaterial({color:0xffffff})
+    ),{position:new THREE.Vector3(0,0,3.3)}));
+
+    const alt=rnd(30,120);
+    g.position.set(rnd(-HALF,HALF),alt,rnd(-HALF,HALF));
+    const horiz=Math.random()>.5;
+    const dir=Math.random()>.5?1:-1;
+    g.userData={axis:horiz?'x':'z',spd:rnd(20,45)*dir,lane:alt};
+    g.rotation.y=horiz?(dir>0?0:Math.PI):(dir>0?-Math.PI/2:Math.PI/2);
+    scene.add(g); flyingCars.push(g);
+  }
+}
+
+// ─── HOLOGRAMS ────────────────────────────────────────────────────────────────
+const holoMeshes=[];
+function spawnHolograms(){
+  for(let i=0;i<15;i++){
+    const col=pick(NEONS);
+    const geo=Math.random()>.5
+      ? new THREE.TorusGeometry(rnd(3,8),rnd(.1,.3),8,24)
+      : new THREE.OctahedronGeometry(rnd(3,7));
+    const m=new THREE.Mesh(geo,
+      new THREE.MeshBasicMaterial({color:col,wireframe:true,transparent:true,opacity:.35})
+    );
+    m.position.set(rnd(-HALF,HALF),rnd(20,80),rnd(-HALF,HALF));
+    m.userData={rx:rnd(-.3,.3),ry:rnd(.1,.4),rz:rnd(-.2,.2)};
+    scene.add(m); holoMeshes.push(m);
+  }
+}
+
+// ─── RAIN ─────────────────────────────────────────────────────────────────────
+let rain;
+function createRain(){
+  const N=2400;
+  const pos=new Float32Array(N*3);
+  for(let i=0;i<N;i++){
+    pos[i*3]=rnd(-250,250); pos[i*3+1]=rnd(0,250); pos[i*3+2]=rnd(-250,250);
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  rain=new THREE.Points(g,new THREE.PointsMaterial({
+    color:0x6688aa,size:.4,transparent:true,opacity:.55,sizeAttenuation:true
+  }));
+  scene.add(rain);
+}
+
+// ─── PLAYER ──────────────────────────────────────────────────────────────────
+const P={
+  pos:new THREE.Vector3(CELL*1.5,2.5,CELL*1.5),
+  yaw:0, pitch:0,
+  mode:'foot',
+  spd:0
+};
+camera.position.copy(P.pos);
+camera.rotation.order='YXZ';
+
+const SPEEDS={foot:14,car:55,fly:75};
+const HEIGHTS={foot:1.7,car:2.2};
+
+// ─── INPUT ───────────────────────────────────────────────────────────────────
+const K={};
+document.addEventListener('keydown',e=>{
+  K[e.code]=true;
+  if(e.code==='Digit1')setMode('foot');
+  if(e.code==='Digit2')setMode('car');
+  if(e.code==='Digit3')setMode('fly');
+});
+document.addEventListener('keyup',e=>{K[e.code]=false});
+
+const IS_TOUCH='ontouchstart' in window||navigator.maxTouchPoints>0;
+let mdx=0,mdy=0,locked=false;
+canvas.addEventListener('click',()=>{if(!IS_TOUCH)canvas.requestPointerLock()});
+document.addEventListener('pointerlockchange',()=>{locked=document.pointerLockElement===canvas});
+document.addEventListener('mousemove',e=>{if(locked){mdx+=e.movementX;mdy+=e.movementY}});
+
+// Joystick state
+const JS={L:{on:false,dx:0,dy:0},R:{on:false,dx:0,dy:0}};
+function setupStick(el,knob,side){
+  const R=46;
+  el.addEventListener('touchstart',e=>{
+    e.preventDefault();
+    const t=e.changedTouches[0];
+    JS[side]={on:true,sx:t.clientX,sy:t.clientY,dx:0,dy:0};
+  },{passive:false});
+  el.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    const s=JS[side]; if(!s.on)return;
+    const t=e.changedTouches[0];
+    let dx=t.clientX-s.sx, dy=t.clientY-s.sy;
+    const len=Math.sqrt(dx*dx+dy*dy);
+    if(len>R){dx=dx/len*R;dy=dy/len*R;}
+    s.dx=dx/R; s.dy=dy/R;
+    knob.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`;
+  },{passive:false});
+  const end=e=>{
+    e.preventDefault();
+    JS[side].on=false; JS[side].dx=0; JS[side].dy=0;
+    knob.style.transform='translate(-50%,-50%)';
+  };
+  el.addEventListener('touchend',end,{passive:false});
+  el.addEventListener('touchcancel',end,{passive:false});
+}
+setupStick(document.getElementById('lj'),document.getElementById('lk'),'L');
+setupStick(document.getElementById('rj'),document.getElementById('rk'),'R');
+
+let vInput=0;
+const upb=document.getElementById('upb'), dnb=document.getElementById('dnb');
+upb.addEventListener('touchstart',e=>{e.preventDefault();vInput=1},{passive:false});
+upb.addEventListener('touchend',e=>{e.preventDefault();vInput=0},{passive:false});
+dnb.addEventListener('touchstart',e=>{e.preventDefault();vInput=-1},{passive:false});
+dnb.addEventListener('touchend',e=>{e.preventDefault();vInput=0},{passive:false});
+upb.addEventListener('mousedown',()=>vInput=1); upb.addEventListener('mouseup',()=>vInput=0);
+dnb.addEventListener('mousedown',()=>vInput=-1); dnb.addEventListener('mouseup',()=>vInput=0);
+
+document.querySelectorAll('.mb').forEach(b=>{
+  b.addEventListener('click',()=>setMode(b.dataset.m));
+  b.addEventListener('touchend',e=>{e.preventDefault();setMode(b.dataset.m)});
+});
+
+function setMode(m){
+  P.mode=m;
+  document.getElementById('mode-disp').textContent=m.toUpperCase();
+  document.querySelectorAll('.mb').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
+  if(m!=='fly'){ P.pos.y=HEIGHTS[m]; P.pitch=0; }
+}
+
+// ─── MINIMAP ─────────────────────────────────────────────────────────────────
+const mmc=document.getElementById('map-c');
+const mmx=mmc.getContext('2d');
+function drawMap(){
+  const S=110;
+  mmx.fillStyle='#03070f'; mmx.fillRect(0,0,S,S);
+  mmx.strokeStyle='#112233'; mmx.lineWidth=1;
+  for(let i=0;i<=GRID;i++){
+    const p=i/GRID*S;
+    mmx.beginPath(); mmx.moveTo(p,0); mmx.lineTo(p,S); mmx.stroke();
+    mmx.beginPath(); mmx.moveTo(0,p); mmx.lineTo(S,p); mmx.stroke();
+  }
+  // Cars
+  mmx.fillStyle='#334466';
+  cars.forEach(c=>{
+    const mx=(c.position.x+HALF)/CITY*S, mz=(c.position.z+HALF)/CITY*S;
+    mmx.fillRect(mx-1,mz-1,2,2);
+  });
+  // Drones
+  mmx.fillStyle='#004422';
+  drones.forEach(d=>{
+    const mx=(d.position.x+HALF)/CITY*S, mz=(d.position.z+HALF)/CITY*S;
+    mmx.fillRect(mx-1,mz-1,2,2);
+  });
+  // Player
+  const px=(P.pos.x+HALF)/CITY*S, pz=(P.pos.z+HALF)/CITY*S;
+  mmx.fillStyle='#00ffff';
+  mmx.beginPath(); mmx.arc(px,pz,3,0,Math.PI*2); mmx.fill();
+  mmx.strokeStyle='#00ffff'; mmx.lineWidth=1;
+  mmx.beginPath(); mmx.moveTo(px,pz);
+  mmx.lineTo(px+Math.sin(P.yaw)*9, pz+Math.cos(P.yaw)*9); mmx.stroke();
+}
+
+// ─── UPDATE PLAYER ────────────────────────────────────────────────────────────
+function updatePlayer(dt){
+  // Look
+  const MSENS=.0018, TSENS=2.2;
+  if(locked){ P.yaw-=mdx*MSENS; P.pitch-=mdy*MSENS; }
+  if(JS.R.on){ P.yaw-=JS.R.dx*TSENS*dt; P.pitch-=JS.R.dy*TSENS*dt; }
+  mdx=0; mdy=0;
+  P.pitch=Math.max(-Math.PI/2.1,Math.min(Math.PI/2.1,P.pitch));
+
+  // Move inputs
+  let fwd=0,str=0,vrt=0;
+  if(K.KeyW||K.ArrowUp)fwd=1;
+  if(K.KeyS||K.ArrowDown)fwd=-1;
+  if(K.KeyD||K.ArrowRight)str=1;
+  if(K.KeyA||K.ArrowLeft)str=-1;
+  if(K.Space||K.KeyE)vrt=1;
+  if(K.ShiftLeft||K.KeyQ)vrt=-1;
+  if(JS.L.on){ fwd=-JS.L.dy; str=JS.L.dx; }
+  vrt+=vInput;
+
+  const spd=SPEEDS[P.mode];
+  const sin=Math.sin(P.yaw), cos=Math.cos(P.yaw);
+
+  if(P.mode==='fly'){
+    // 3D flight: forward follows pitch
+    const fsin=Math.sin(P.pitch), fcos=Math.cos(P.pitch);
+    const wx=fwd*(-sin*fcos)+str*cos;
+    const wy=fwd*fsin;
+    const wz=fwd*(-cos*fcos)+str*(-sin);
+    P.pos.x+=wx*spd*dt;
+    P.pos.y+=wy*spd*dt+vrt*spd*.5*dt;
+    P.pos.z+=wz*spd*dt;
+    P.pos.y=Math.max(5,P.pos.y);
+  } else {
+    // Ground
+    const wx=fwd*(-sin)+str*cos;
+    const wz=fwd*(-cos)+str*(-sin);
+    P.pos.x+=wx*spd*dt;
+    P.pos.z+=wz*spd*dt;
+    P.pos.y=HEIGHTS[P.mode];
+  }
+
+  // Wrap city bounds
+  if(P.pos.x> HALF)P.pos.x=-HALF;
+  if(P.pos.x<-HALF)P.pos.x= HALF;
+  if(P.pos.z> HALF)P.pos.z=-HALF;
+  if(P.pos.z<-HALF)P.pos.z= HALF;
+
+  // Speed display
+  const len2d=Math.sqrt(
+    (P.pos.x-camera.position.x)**2+(P.pos.z-camera.position.z)**2
+  );
+  P.spd=len2d/dt*3.6;
+
+  camera.position.copy(P.pos);
+  camera.rotation.y=P.yaw;
+  camera.rotation.x=P.pitch;
+}
+
+// ─── UPDATE NPCS ──────────────────────────────────────────────────────────────
+function updateNPCs(dt,t){
+  cars.forEach(c=>{
+    c.position[c.userData.axis]+=c.userData.spd*dt;
+    if(c.position[c.userData.axis]>HALF)c.position[c.userData.axis]=-HALF;
+    if(c.position[c.userData.axis]<-HALF)c.position[c.userData.axis]=HALF;
+  });
+
+  flyingCars.forEach(c=>{
+    c.position[c.userData.axis]+=c.userData.spd*dt;
+    if(c.position[c.userData.axis]>HALF)c.position[c.userData.axis]=-HALF;
+    if(c.position[c.userData.axis]<-HALF)c.position[c.userData.axis]=HALF;
+  });
+
+  drones.forEach(d=>{
+    const u=d.userData;
+    u.ang+=u.spd*dt*.022;
+    d.position.x=u.cx+Math.cos(u.ang)*u.rad;
+    d.position.z=u.cz+Math.sin(u.ang)*u.rad;
+    d.position.y=u.by+Math.sin(t*u.bspd)*u.bamp;
+    d.rotation.y=u.ang+Math.PI/2;
+    d.children.forEach(ch=>{if(ch.userData.rotor)ch.rotation.y+=8*dt;});
+  });
+
+  holoMeshes.forEach(h=>{
+    h.rotation.x+=h.userData.rx*dt;
+    h.rotation.y+=h.userData.ry*dt;
+    h.rotation.z+=h.userData.rz*dt;
+  });
+}
+
+// ─── UPDATE RAIN ──────────────────────────────────────────────────────────────
+function updateRain(dt){
+  if(!rain)return;
+  const p=rain.geometry.attributes.position.array;
+  const N=p.length/3;
+  for(let i=0;i<N;i++){
+    p[i*3+1]-=55*dt;
+    if(p[i*3+1]<0){
+      p[i*3]=P.pos.x+rnd(-250,250);
+      p[i*3+1]=P.pos.y+rnd(150,260);
+      p[i*3+2]=P.pos.z+rnd(-250,250);
+    }
+  }
+  rain.geometry.attributes.position.needsUpdate=true;
+}
+
+// ─── ANIMATE SCENE ELEMENTS ───────────────────────────────────────────────────
+function updateAnim(t){
+  // Neon sign pulse
+  neonMeshes.forEach(m=>{
+    const v=.85+.15*Math.sin(t*1.8+m.userData.phase);
+    m.material.opacity=v;
+  });
+  // Antenna blinks
+  blinkLights.forEach(b=>{
+    const on=Math.sin(t*b.userData.rate*Math.PI*2+b.userData.phase)>.5;
+    b.material.color.setHex(on?0xff2200:0x220000);
+  });
+}
+
+// ─── HUD ─────────────────────────────────────────────────────────────────────
+const spdEl=document.getElementById('spd');
+function updateHUD(){
+  spdEl.innerHTML=`${Math.round(P.spd)}<small>KM/H</small>`;
+}
+
+// ─── RESIZE ──────────────────────────────────────────────────────────────────
+window.addEventListener('resize',()=>{
+  camera.aspect=W()/H();
+  camera.updateProjectionMatrix();
+  renderer.setSize(W(),H());
+  composer.setSize(W(),H());
+});
+
+// ─── LOADING ─────────────────────────────────────────────────────────────────
+function setLoad(pct,txt){
+  document.getElementById('lbar').style.width=pct+'%';
+  document.getElementById('ltxt').textContent=txt;
+}
+const tick=ms=>new Promise(r=>setTimeout(r,ms));
+
+async function init(){
+  setLoad(8,'INITIALIZING RENDERER...');  await tick(40);
+  setLoad(18,'GENERATING SKY...');         await tick(30);
+  createGround_ext(); // empty, already done above
+  setLoad(30,'CONSTRUCTING CITY...');
+  for(let gx=0;gx<GRID;gx++){
+    for(let gz=0;gz<GRID;gz++) generateBlock(gx,gz);
+    if(gx%3===0){setLoad(30+gx*4,'CONSTRUCTING CITY...'); await tick(10);}
+  }
+  setLoad(72,'SPAWNING TRAFFIC...');       await tick(30);
+  spawnCars(); spawnFlyingCars();
+  setLoad(82,'LAUNCHING DRONES...');       await tick(30);
+  spawnDrones();
+  setLoad(88,'SPAWNING HOLOGRAMS...');     await tick(20);
+  spawnHolograms();
+  setLoad(93,'STARTING WEATHER...');       await tick(20);
+  createRain();
+  setLoad(100,'MEGACITY ONLINE');          await tick(400);
+
+  document.getElementById('enter-btn').style.display='block';
+}
+function createGround_ext(){}// stub, already done at module level
+
+document.getElementById('enter-btn').addEventListener('click',startGame);
+document.getElementById('enter-btn').addEventListener('touchend',e=>{e.preventDefault();startGame();});
+
+function startGame(){
+  document.getElementById('load').style.transition='opacity .6s';
+  document.getElementById('load').style.opacity='0';
+  setTimeout(()=>document.getElementById('load').style.display='none',600);
+  if(!IS_TOUCH)canvas.requestPointerLock();
+  requestAnimationFrame(loop);
+}
+
+// ─── MAIN LOOP ────────────────────────────────────────────────────────────────
+let last=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt=Math.min((now-last)/1000,.05); last=now;
+  if(dt<=0)return;
+  const t=now/1000;
+  updatePlayer(dt);
+  updateNPCs(dt,t);
+  updateRain(dt);
+  updateAnim(t);
+  drawMap();
+  updateHUD();
+  composer.render();
+}
+
+init();
+</script>
+</body>
+</html>
