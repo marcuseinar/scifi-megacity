@@ -227,6 +227,12 @@ for(let i=0;i<=GRID;i++){
 const neonMeshes=[];   // for animation
 const blinkLights=[];  // antenna blinkers
 
+// Pre-pool sign textures — one canvas per sign text, reused across all buildings
+const SIGN_TEX=SIGNS.map(text=>makeSignTex(text,pick(NEONS)));
+
+// Shared antenna/pole material
+const POLE_MAT=new THREE.MeshStandardMaterial({color:0x223344,metalness:.8,roughness:.4});
+
 function addBuilding(bx,bz,bw,bd,bh){
   const wt=WIN_TEX[Math.floor(Math.random()*WIN_TEX.length)].clone();
   wt.repeat.set(Math.max(1,Math.round(bw/8)),Math.max(1,Math.round(bh/10)));
@@ -244,10 +250,7 @@ function addBuilding(bx,bz,bw,bd,bh){
 
   // Antenna on tall buildings
   if(bh>70){
-    const pole=new THREE.Mesh(
-      new THREE.CylinderGeometry(.25,.25,15,6),
-      new THREE.MeshStandardMaterial({color:0x223344,metalness:.8})
-    );
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(.25,.25,15,6),POLE_MAT);
     pole.position.set(bx,bh+7.5,bz); scene.add(pole);
 
     const bm=new THREE.Mesh(
@@ -259,11 +262,9 @@ function addBuilding(bx,bz,bw,bd,bh){
     scene.add(bm); blinkLights.push(bm);
   }
 
-  // Neon sign
+  // Neon sign — pick from pre-pooled textures
   if(Math.random()>.45&&bh>18){
-    const col=pick(NEONS);
-    const txt=pick(SIGNS);
-    const stex=makeSignTex(txt,col);
+    const stex=pick(SIGN_TEX);
     const sm=new THREE.Mesh(
       new THREE.PlaneGeometry(16,4),
       new THREE.MeshBasicMaterial({map:stex,transparent:true,side:THREE.DoubleSide,depthWrite:false})
@@ -275,7 +276,7 @@ function addBuilding(bx,bz,bw,bd,bh){
     else if(side===1){sm.position.set(bx,sh,bz-bd/2-off); sm.rotation.y=Math.PI;}
     else if(side===2){sm.position.set(bx+bw/2+off,sh,bz); sm.rotation.y=-Math.PI/2;}
     else              {sm.position.set(bx-bw/2-off,sh,bz); sm.rotation.y= Math.PI/2;}
-    sm.userData={col,phase:Math.random()*Math.PI*2};
+    sm.userData={phase:Math.random()*Math.PI*2};
     scene.add(sm); neonMeshes.push(sm);
   }
 }
@@ -329,32 +330,34 @@ function generateBlock(gx,gz){
 
 // ─── NPC CARS ─────────────────────────────────────────────────────────────────
 const cars=[];
+
+// Shared car materials — created once, reused across all cars
+const CAR_MATS=[0x334466,0x553333,0x335533,0x444455,0x553355,0x224488,0x445544].map(
+  c=>new THREE.MeshBasicMaterial({color:c})
+);
+const CAR_CABIN_MAT=new THREE.MeshBasicMaterial({color:0x0a1520});
+const CAR_HL_MAT=new THREE.MeshBasicMaterial({color:0xffffff});
+const CAR_TL_MAT=new THREE.MeshBasicMaterial({color:0xff1100});
+
+// Shared car geometries
+const CAR_BODY_GEO=new THREE.BoxGeometry(3.5,1.3,7.5);
+const CAR_CAB_GEO=new THREE.BoxGeometry(2.8,1.1,3.8);
+const CAR_LIGHT_GEO=new THREE.BoxGeometry(.4,.25,.2);
+
 function spawnCars(){
-  const ccolors=[0x334466,0x553333,0x335533,0x444455,0x553355,0x224488,0x445544];
-  for(let i=0;i<55;i++){
+  for(let i=0;i<40;i++){
     const g=new THREE.Group();
-    const col=pick(ccolors);
-    // Body
-    g.add(Object.assign(new THREE.Mesh(
-      new THREE.BoxGeometry(3.5,1.3,7.5),
-      new THREE.MeshStandardMaterial({color:col,metalness:.7,roughness:.3})
-    ),{position:{x:0,y:0,z:0}}));
+    // Body — just add the mesh, no Object.assign needed
+    const body=new THREE.Mesh(CAR_BODY_GEO,pick(CAR_MATS));
+    g.add(body);
     // Cabin
-    const cab=new THREE.Mesh(
-      new THREE.BoxGeometry(2.8,1.1,3.8),
-      new THREE.MeshStandardMaterial({color:0x112233,metalness:.3,roughness:.1})
-    );
+    const cab=new THREE.Mesh(CAR_CAB_GEO,CAR_CABIN_MAT);
     cab.position.set(0,1.2,-0.4); g.add(cab);
-    // Headlights
+    // Headlights / taillights — shared geo + mat
     [-1.2,1.2].forEach(sx=>{
-      const hl=new THREE.Mesh(new THREE.BoxGeometry(.4,.25,.2),
-        new THREE.MeshBasicMaterial({color:0xffffff}));
+      const hl=new THREE.Mesh(CAR_LIGHT_GEO,CAR_HL_MAT);
       hl.position.set(sx,0,3.7); g.add(hl);
-    });
-    // Taillights
-    [-1.2,1.2].forEach(sx=>{
-      const tl=new THREE.Mesh(new THREE.BoxGeometry(.4,.25,.2),
-        new THREE.MeshBasicMaterial({color:0xff1100}));
+      const tl=new THREE.Mesh(CAR_LIGHT_GEO,CAR_TL_MAT);
       tl.position.set(sx,0,-3.7); g.add(tl);
     });
 
@@ -431,10 +434,8 @@ function spawnFlyingCars(){
     );
     ul.rotation.x=Math.PI/2; ul.position.y=-.6; g.add(ul);
     // Headlight
-    g.add(Object.assign(new THREE.Mesh(
-      new THREE.BoxGeometry(.6,.3,.2),
-      new THREE.MeshBasicMaterial({color:0xffffff})
-    ),{position:new THREE.Vector3(0,0,3.3)}));
+    const fhl=new THREE.Mesh(new THREE.BoxGeometry(.6,.3,.2),CAR_HL_MAT);
+    fhl.position.set(0,0,3.3); g.add(fhl);
 
     const alt=rnd(30,120);
     g.position.set(rnd(-HALF,HALF),alt,rnd(-HALF,HALF));
@@ -734,27 +735,31 @@ function setLoad(pct,txt){
 const tick=ms=>new Promise(r=>setTimeout(r,ms));
 
 async function init(){
-  setLoad(8,'INITIALIZING RENDERER...');  await tick(40);
-  setLoad(18,'GENERATING SKY...');         await tick(30);
-  createGround_ext(); // empty, already done above
-  setLoad(30,'CONSTRUCTING CITY...');
-  for(let gx=0;gx<GRID;gx++){
-    for(let gz=0;gz<GRID;gz++) generateBlock(gx,gz);
-    if(gx%3===0){setLoad(30+gx*4,'CONSTRUCTING CITY...'); await tick(10);}
+  try{
+    setLoad(8,'INITIALIZING RENDERER...');  await tick(40);
+    setLoad(18,'GENERATING SKY...');         await tick(30);
+    setLoad(30,'CONSTRUCTING CITY...');
+    for(let gx=0;gx<GRID;gx++){
+      for(let gz=0;gz<GRID;gz++) generateBlock(gx,gz);
+      if(gx%3===0){setLoad(30+gx*4,'CONSTRUCTING CITY...'); await tick(10);}
+    }
+    setLoad(72,'SPAWNING TRAFFIC...');       await tick(30);
+    spawnCars(); await tick(20);
+    spawnFlyingCars();
+    setLoad(82,'LAUNCHING DRONES...');       await tick(30);
+    spawnDrones();
+    setLoad(88,'SPAWNING HOLOGRAMS...');     await tick(20);
+    spawnHolograms();
+    setLoad(93,'STARTING WEATHER...');       await tick(20);
+    createRain();
+    setLoad(100,'MEGACITY ONLINE');          await tick(400);
+    document.getElementById('enter-btn').style.display='block';
+  }catch(e){
+    console.error('Init failed:',e);
+    document.getElementById('ltxt').textContent='ERROR: '+e.message;
+    document.getElementById('ltxt').style.color='#ff4444';
   }
-  setLoad(72,'SPAWNING TRAFFIC...');       await tick(30);
-  spawnCars(); spawnFlyingCars();
-  setLoad(82,'LAUNCHING DRONES...');       await tick(30);
-  spawnDrones();
-  setLoad(88,'SPAWNING HOLOGRAMS...');     await tick(20);
-  spawnHolograms();
-  setLoad(93,'STARTING WEATHER...');       await tick(20);
-  createRain();
-  setLoad(100,'MEGACITY ONLINE');          await tick(400);
-
-  document.getElementById('enter-btn').style.display='block';
 }
-function createGround_ext(){}// stub, already done at module level
 
 document.getElementById('enter-btn').addEventListener('click',startGame);
 document.getElementById('enter-btn').addEventListener('touchend',e=>{e.preventDefault();startGame();});
