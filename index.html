@@ -373,7 +373,9 @@ function facadeTex(kind){
 const FACADE_KINDS=['grid','ribbon','curtain','clad','ribbed','louvre','hab','corrugated'];
 const FACADES=[];   // filled during init so the loader can breathe
 // Tints so no two neighbours read the same — concrete, rust, sand, teal, plum
-const BTINTS=[0x99a1ad,0x6d7583,0x8a6f5f,0x6a5d78,0x53616e,0x8f6a58,0x5c6f63,0xa39a8a,0x454c59,0x7a5a5a];
+// Real surface colours. These multiply an already-dark albedo and are then
+// converted sRGB->linear, so anything dim here compounds into a black void.
+const BTINTS=[0xdbdbdb, 0x9ea9bd, 0xc8a089, 0x9986ae, 0x788c9f, 0xcf997f, 0x85a08f, 0xdbdbc8, 0x646e81, 0xb08282];
 
 
 // ─── OPTIONAL REAL TEXTURE PACKS ─────────────────────────────────────────────
@@ -674,16 +676,16 @@ function skylineTex(o){
 // ─── LIGHTING ─────────────────────────────────────────────────────────────────
 // Deliberately dim: away from a lamp, a sign or a window the street is dark and
 // buildings read as silhouettes against the sky.
-scene.add(new THREE.AmbientLight(0x8f93c8,0.42));
-const moon=new THREE.DirectionalLight(0x9aa6e8,0.55);
+scene.add(new THREE.AmbientLight(0x8f93c8,1.15));
+const moon=new THREE.DirectionalLight(0x9aa6e8,1.45);
 moon.position.set(200,400,100); scene.add(moon);
-const glowKey=new THREE.DirectionalLight(0xff5a8a,0.30);   // bounce off the horizon
+const glowKey=new THREE.DirectionalLight(0xff5a8a,0.85);   // bounce off the horizon
 glowKey.position.set(-420,120,-900); scene.add(glowKey);
-scene.add(new THREE.HemisphereLight(0x7c68c0,0x14161f,0.38));
+scene.add(new THREE.HemisphereLight(0x7c68c0,0x2a1c30,1.05));
 
 // District fills — the only broad colour in the streets
 [[0x0055aa,200,200],[0xaa0055,-200,200],[0x00aa66,0,-200]].forEach(([col,x,z])=>{
-  const l=new THREE.PointLight(col,0.85,560);
+  const l=new THREE.PointLight(col,1.35,560);
   l.position.set(x,70,z); scene.add(l);
 });
 
@@ -961,6 +963,7 @@ function lightPool(x,z,r,ci){
   g.setAttribute('color',new THREE.BufferAttribute(col,3));
   place('POOL',POOL_MAT,g,x,.12,z);
 }
+
 
 // ─── BUILDING ────────────────────────────────────────────────────────────────
 function addBuilding(bx,bz,bw,bd,bh,style){
