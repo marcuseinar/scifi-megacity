@@ -136,6 +136,48 @@ composer.addPass(bloom);
 function rnd(a,b){return a+Math.random()*(b-a)}
 function pick(arr){return arr[Math.floor(Math.random()*arr.length)]}
 
+// ─── DERIVED SURFACE MAPS ────────────────────────────────────────────────────
+// Treat the albedo's luminance as a height field: window reveals, panel seams,
+// ribs and corrugation all become real relief under the lighting.
+function deriveMaps(src,strength,baseRough,baseMetal){
+  // One readback, one pass, half resolution: relief and roughness are broad
+  // signals, so full-res derivation would just cost load time for nothing.
+  const sw=src.width,sh=src.height;
+  const d=src.getContext('2d').getImageData(0,0,sw,sh).data;
+  const w=Math.max(2,sw>>1),h=Math.max(2,sh>>1);
+  const lum=new Float32Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    const i=((y*2)*sw+x*2)*4;
+    lum[y*w+x]=(d[i]*.299+d[i+1]*.587+d[i+2]*.114)/255;
+  }
+  const nc=document.createElement('canvas'); nc.width=w; nc.height=h;
+  const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const nctx=nc.getContext('2d'), octx=oc.getContext('2d');
+  const nImg=nctx.createImageData(w,h), oImg=octx.createImageData(w,h);
+  const L=(x,y)=>lum[((y+h)%h)*w+((x+w)%w)];
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    const k=(y*w+x)*4;
+    // canvas y runs down, texture v runs up, so the v derivative flips sign
+    const nx=-(L(x+1,y)-L(x-1,y))*strength;
+    const ny= (L(x,y+1)-L(x,y-1))*strength;
+    const len=Math.hypot(nx,ny,1);
+    nImg.data[k]  =(nx/len*.5+.5)*255;
+    nImg.data[k+1]=(ny/len*.5+.5)*255;
+    nImg.data[k+2]=(1/len*.5+.5)*255;
+    nImg.data[k+3]=255;
+    // G = roughness, B = metalness — the channels three actually reads.
+    // Window glass is near-black in the albedo, so it comes out smooth.
+    const glass=lum[y*w+x]<.10;
+    const rough=glass?.12:Math.min(1,Math.max(0,baseRough+(Math.random()-.5)*.10));
+    oImg.data[k]  =255;                   // R: unused (AO needs a second UV set)
+    oImg.data[k+1]=rough*255;
+    oImg.data[k+2]=(glass?.05:baseMetal)*255;
+    oImg.data[k+3]=255;
+  }
+  nctx.putImageData(nImg,0,0); octx.putImageData(oImg,0,0);
+  return {normal:nc,orm:oc};
+}
+
 // ─── FACADE LIBRARY ──────────────────────────────────────────────────────────
 // Every facade type ships an albedo map and a matching emissive map, so a wall
 // is only bright where something on it is actually lit. `wu`/`hu` are the world
@@ -165,7 +207,7 @@ function facadeTex(kind){
       a.fillRect(x,y,w,h);
     }
   };
-  let wu=26,hu=54,rough=.85,metal=.1,glow=1.0;
+  let wu=26,hu=54,rough=.85,metal=.1,glow=1.0,relief=3.0;
 
   if(kind==='grid'){                     // punched windows in a concrete frame
     a.fillStyle='#7b8290'; a.fillRect(0,0,W,H);
@@ -174,7 +216,7 @@ function facadeTex(kind){
       a.fillStyle='rgba(0,0,0,.32)';       a.fillRect(0,r*16+2,W,1);
     }
     for(let r=0;r<16;r++)for(let c=0;c<8;c++)win(c*16+3,r*16+4,10,10,.38);
-    stains(26,.3); wu=26; hu=54;
+    stains(26,.3); wu=26; hu=54; relief=3.4;
 
   }else if(kind==='ribbon'){             // horizontal ribbon glazing
     a.fillStyle='#68707e'; a.fillRect(0,0,W,H);
@@ -188,7 +230,7 @@ function facadeTex(kind){
         }
       }
     }
-    stains(14,.22); wu=30; hu=56; rough=.4; metal=.5;
+    stains(14,.22); wu=30; hu=56; rough=.4; metal=.5; relief=2.6;
 
   }else if(kind==='curtain'){            // full glass curtain wall
     a.fillStyle='#16202e'; a.fillRect(0,0,W,H);
@@ -202,7 +244,7 @@ function facadeTex(kind){
     }
     for(let c=0;c<16;c++){a.fillStyle='rgba(0,0,0,.5)';a.fillRect(c*8,0,1,H);}
     for(let r=0;r<32;r++){a.fillStyle='rgba(0,0,0,.4)';a.fillRect(0,r*8,W,1);}
-    wu=34; hu=60; rough=.22; metal=.75; glow=.85;
+    wu=34; hu=60; rough=.22; metal=.75; glow=.85; relief=1.6;
 
   }else if(kind==='clad'){               // bolted metal cladding panels
     a.fillStyle='#5a626e'; a.fillRect(0,0,W,H);
@@ -218,7 +260,7 @@ function facadeTex(kind){
       }
       if(Math.random()<.4)win(c*32+8,r*32+10,16,9,.55,true);
     }
-    stains(30,.35); wu=30; hu=62; rough=.45; metal=.7;
+    stains(30,.35); wu=30; hu=62; rough=.45; metal=.7; relief=3.8;
 
   }else if(kind==='ribbed'){             // vertical concrete ribs, slot windows
     a.fillStyle='#6c7078'; a.fillRect(0,0,W,H);
@@ -227,7 +269,7 @@ function facadeTex(kind){
       a.fillRect(c*8,0,8,H);
     }
     for(let r=0;r<21;r++)for(let c=0;c<8;c++)win(c*16+5,r*12+4,6,7,.32);
-    stains(34,.4); wu=24; hu=52; rough=.92; metal=.05;
+    stains(34,.4); wu=24; hu=52; rough=.92; metal=.05; relief=4.2;
 
   }else if(kind==='louvre'){             // machine block: louvres and vents
     a.fillStyle='#454b55'; a.fillRect(0,0,W,H);
@@ -243,7 +285,7 @@ function facadeTex(kind){
         e.globalAlpha=.5+Math.random()*.4; e.fillRect(x+1,y+1,26,8); e.globalAlpha=1;
       }
     }
-    stains(40,.45); wu=28; hu=48; rough=.7; metal=.55; glow=1.1;
+    stains(40,.45); wu=28; hu=48; rough=.7; metal=.55; glow=1.1; relief=4.5;
 
   }else if(kind==='hab'){                // old housing block, warm windows
     a.fillStyle='#7d6f63'; a.fillRect(0,0,W,H);
@@ -257,7 +299,7 @@ function facadeTex(kind){
         a.fillStyle='rgba(20,24,30,.85)'; a.fillRect(c*16+2,r*16+11,13,3);
       }
     }
-    stains(46,.42); wu=24; hu=50; rough=.95; metal=.03;
+    stains(46,.42); wu=24; hu=50; rough=.95; metal=.03; relief=3.2;
 
   }else{ // 'corrugated' — industrial low-rise
     a.fillStyle='#4e5348'; a.fillRect(0,0,W,H);
@@ -270,25 +312,40 @@ function facadeTex(kind){
       a.fillRect(Math.random()*W,Math.random()*H,rnd(6,26),rnd(8,40));
     }
     for(let c=0;c<8;c++)if(Math.random()<.5)win(c*16+4,H-40,9,12,.5,true);
-    wu=26; hu=46; rough=.9; metal=.35;
+    wu=26; hu=46; rough=.9; metal=.35; relief=4.0;
   }
 
   // Roof texel the flat tops sample
   a.fillStyle='#2c3138'; a.fillRect(0,H-1,1,1);
   e.fillStyle='#000';    e.fillRect(0,H-1,1,1);
 
-  const mk=c=>{
+  const mk=(c,data)=>{
     const t=new THREE.CanvasTexture(c);
     t.wrapS=t.wrapT=THREE.RepeatWrapping;
-    t.colorSpace=THREE.SRGBColorSpace;
+    if(!data)t.colorSpace=THREE.SRGBColorSpace;   // normal/ORM maps are data
     t.anisotropy=4;
     return t;
   };
-  return {map:mk(ac),emis:mk(ec),wu,hu,rough,metal,glow};
+  const dm=deriveMaps(ac,relief,rough,metal);
+  return {kind,map:mk(ac),emis:mk(ec),
+          norm:mk(dm.normal,true),orm:mk(dm.orm,true),
+          wu,hu,rough,metal,glow,relief};
 }
-const FACADES=['grid','ribbon','curtain','clad','ribbed','louvre','hab','corrugated'].map(facadeTex);
+const FACADE_KINDS=['grid','ribbon','curtain','clad','ribbed','louvre','hab','corrugated'];
+const FACADES=[];   // filled during init so the loader can breathe
 // Tints so no two neighbours read the same — concrete, rust, sand, teal, plum
 const BTINTS=[0x99a1ad,0x6d7583,0x8a6f5f,0x6a5d78,0x53616e,0x8f6a58,0x5c6f63,0xa39a8a,0x454c59,0x7a5a5a];
+
+
+// ─── OPTIONAL REAL TEXTURE PACKS ─────────────────────────────────────────────
+// Drop seamless CC0 PBR maps (ambientCG, Poly Haven, cgbookcase) into a
+// ./textures folder and name them here to override a procedural facade. Ship
+// them at 512–1024px as .webp/.jpg — 4K sets will stall a phone. Anything you
+// leave out keeps using the generated canvas, so you can convert one facade at
+// a time. `wu`/`hu` are the world size one tile covers, in metres.
+//   clad:{map:'textures/metal_diff.webp', normalMap:'textures/metal_nor.webp',
+//         roughnessMap:'textures/metal_rough.webp', wu:30, hu:62}
+const TEXTURE_PACKS={};
 
 // ─── NEON SIGN TEXTURE ────────────────────────────────────────────────────────
 function makeSignTex(text,col){
@@ -329,8 +386,7 @@ const skyUniforms={
 
 // Gradient dome: indigo zenith → violet → magenta smog glow at the horizon,
 // with a warm hotspot in one direction and slow aurora banding up high.
-(()=>{
-  const mat=new THREE.ShaderMaterial({
+const skyMat=new THREE.ShaderMaterial({
     uniforms:skyUniforms,
     vertexShader:`varying vec3 vp;void main(){vp=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
     fragmentShader:`
@@ -350,11 +406,35 @@ const skyUniforms={
         gl_FragColor=vec4(col,1.0);
       }`,
     side:THREE.BackSide,depthWrite:false,fog:false
-  });
-  const m=new THREE.Mesh(new THREE.SphereGeometry(1600,32,24),mat);
+});
+(()=>{
+  const m=new THREE.Mesh(new THREE.SphereGeometry(1600,32,24),skyMat);
   m.renderOrder=-100; m.frustumCulled=false;
   domeGroup.add(m);
 })();
+
+// ─── ENVIRONMENT MAP ─────────────────────────────────────────────────────────
+// A metal with nothing to reflect renders black, which is why the city looked
+// flat. Prefilter the sky dome into an environment map once at load: no
+// download, and it always matches whatever the sky is doing. Swap in an HDRI
+// here later (Poly Haven, CC0) if you want real captured light.
+function buildEnvMap(){
+  const pmrem=new THREE.PMREMGenerator(renderer);
+  const tmp=new THREE.Scene();
+  // the shader reads direction from the local position, so radius is irrelevant
+  const dome=new THREE.Mesh(new THREE.SphereGeometry(10,32,24),skyMat);
+  tmp.add(dome);
+  // stand-in for the lit city below the horizon, so upward faces aren't dead
+  const glow=new THREE.Mesh(
+    new THREE.SphereGeometry(9.6,24,16,0,Math.PI*2,Math.PI*.5,Math.PI*.5),
+    new THREE.MeshBasicMaterial({color:0x2a1430,side:THREE.BackSide})
+  );
+  tmp.add(glow);
+  const rt=pmrem.fromScene(tmp,0,1,60);
+  scene.environment=rt.texture;
+  pmrem.dispose();
+  dome.geometry.dispose(); glow.geometry.dispose(); glow.material.dispose();
+}
 
 // Stars — thinned out near the horizon where the city glow drowns them
 (()=>{
@@ -555,12 +635,12 @@ function skylineTex(o){
 // ─── LIGHTING ─────────────────────────────────────────────────────────────────
 // Deliberately dim: away from a lamp, a sign or a window the street is dark and
 // buildings read as silhouettes against the sky.
-scene.add(new THREE.AmbientLight(0x8f93c8,0.72));
+scene.add(new THREE.AmbientLight(0x8f93c8,0.42));
 const moon=new THREE.DirectionalLight(0x9aa6e8,0.55);
 moon.position.set(200,400,100); scene.add(moon);
 const glowKey=new THREE.DirectionalLight(0xff5a8a,0.30);   // bounce off the horizon
 glowKey.position.set(-420,120,-900); scene.add(glowKey);
-scene.add(new THREE.HemisphereLight(0x7c68c0,0x14161f,0.68));
+scene.add(new THREE.HemisphereLight(0x7c68c0,0x14161f,0.38));
 
 // District fills — the only broad colour in the streets
 [[0x0055aa,200,200],[0xaa0055,-200,200],[0x00aa66,0,-200]].forEach(([col,x,z])=>{
@@ -577,7 +657,16 @@ function canvasTex(w,h,draw,rep){
   t.colorSpace=THREE.SRGBColorSpace;
   if(rep)t.repeat.set(rep,rep);
   t.anisotropy=4;
+  t.sourceCanvas=c;
   return t;
+}
+// Matching normal map for a canvasTex, sharing its tiling
+function canvasNormal(tex,strength){
+  const n=new THREE.CanvasTexture(deriveMaps(tex.sourceCanvas,strength,1,0).normal);
+  n.wrapS=n.wrapT=THREE.RepeatWrapping;
+  n.repeat.copy(tex.repeat);
+  n.anisotropy=4;
+  return n;
 }
 
 // Wet asphalt
@@ -619,7 +708,9 @@ const paveTex=canvasTex(256,256,x=>{
 
 const ground=new THREE.Mesh(
   new THREE.PlaneGeometry(2600,2600),
-  new THREE.MeshStandardMaterial({map:asphaltTex,color:0xffffff,roughness:.34,metalness:.5})
+  new THREE.MeshStandardMaterial({map:asphaltTex,color:0xffffff,
+    normalMap:canvasNormal(asphaltTex,1.6),normalScale:new THREE.Vector2(.5,.5),
+    roughness:.34,metalness:.5,envMapIntensity:1.25})
 );
 ground.rotation.x=-Math.PI/2; scene.add(ground);
 
@@ -689,6 +780,35 @@ function uvCyl(g,su,sv){
   return g;
 }
 
+
+// Swap in a downloaded pack for this facade if one is configured
+const TEX_LOADER=new THREE.TextureLoader();
+const PACK_CACHE=new Map();
+function packTex(url,data,rep){
+  const key=url+'|'+rep.join(',');
+  let t=PACK_CACHE.get(key);
+  if(!t){
+    t=TEX_LOADER.load(url);
+    t.wrapS=t.wrapT=THREE.RepeatWrapping;
+    if(!data)t.colorSpace=THREE.SRGBColorSpace;
+    t.anisotropy=4;
+    PACK_CACHE.set(key,t);
+  }
+  return t;
+}
+function applyPack(m,F){
+  const p=TEXTURE_PACKS[F.kind];
+  if(!p)return;
+  const rep=[p.wu||F.wu,p.hu||F.hu];
+  if(p.map)          {m.map=packTex(p.map,false,rep); m.color.setHex(0xffffff);}
+  if(p.normalMap)     m.normalMap=packTex(p.normalMap,true,rep);
+  if(p.roughnessMap){ m.roughnessMap=packTex(p.roughnessMap,true,rep); m.metalnessMap=p.metalnessMap?packTex(p.metalnessMap,true,rep):null;
+                      m.metalness=p.metalness!==undefined?p.metalness:F.metal; }
+  if(p.wu)F.wu=p.wu;
+  if(p.hu)F.hu=p.hu;
+  m.needsUpdate=true;
+}
+
 // ─── MATERIALS ────────────────────────────────────────────────────────────────
 const FACADE_MATS=new Map();
 function facadeMat(fi,ti){
@@ -696,21 +816,26 @@ function facadeMat(fi,ti){
   let m=FACADE_MATS.get(k);
   if(!m){
     const F=FACADES[fi];
+    // roughness/metalness are baked into the ORM map, so the scalars are
+    // multipliers left at 1
     m=new THREE.MeshStandardMaterial({
       map:F.map, color:BTINTS[ti],
       emissiveMap:F.emis, emissive:0xffffff, emissiveIntensity:F.glow,
-      roughness:F.rough, metalness:F.metal
+      normalMap:F.norm, normalScale:new THREE.Vector2(.9,.9),
+      roughnessMap:F.orm, metalnessMap:F.orm,
+      roughness:1, metalness:1, envMapIntensity:.8
     });
+    applyPack(m,F);
     FACADE_MATS.set(k,m);
   }
   return m;
 }
 // Weathered concrete + the blocky primary accents of a mega-block
 const CONC_MATS=[0x7d8490,0x565d68,0x373d47,0x21262e].map(
-  c=>new THREE.MeshStandardMaterial({color:c,roughness:.92,metalness:.08}));
+  c=>new THREE.MeshStandardMaterial({color:c,roughness:.92,metalness:.08,envMapIntensity:.7}));
 const ACC_MATS=[0x9c2f28,0xc09028,0x2c5688,0xad4a22,0x27705f,0x63308a,0xa8a396].map(
   c=>new THREE.MeshStandardMaterial({color:c,roughness:.78,metalness:.15}));
-const GREEBLE_MAT=new THREE.MeshStandardMaterial({color:0x232a36,roughness:.55,metalness:.65});
+const GREEBLE_MAT=new THREE.MeshStandardMaterial({color:0x232a36,roughness:.55,metalness:.65,envMapIntensity:1.1});
 const RUST_MAT=new THREE.MeshStandardMaterial({color:0x4a3228,roughness:.9,metalness:.2});
 // Architectural light strips are dimmed — there are a lot of them
 const STRIP_MATS=NEONS.map(c=>new THREE.MeshBasicMaterial({color:new THREE.Color(c).multiplyScalar(.38)}));
@@ -722,7 +847,9 @@ const TRUNK_MAT=new THREE.MeshStandardMaterial({color:0x2e2620,roughness:.95,met
 const FOLIAGE_MATS=[0x7e2a72,0x54318c,0xa33580,0x2f6f62,0x8d3f96].map(c=>
   new THREE.MeshStandardMaterial({color:c,roughness:.95,metalness:0,
     emissive:new THREE.Color(c).multiplyScalar(.30)}));
-const PAVE_MAT=new THREE.MeshStandardMaterial({map:paveTex,roughness:.55,metalness:.25});
+const PAVE_MAT=new THREE.MeshStandardMaterial({map:paveTex,
+  normalMap:canvasNormal(paveTex,2.2),normalScale:new THREE.Vector2(.8,.8),
+  roughness:.55,metalness:.25,envMapIntensity:1.0});
 const CURB_MAT=new THREE.MeshStandardMaterial({color:0x3c414c,roughness:.85,metalness:.1});
 
 // Fake pools of light — additive discs on the pavement, no extra real lights.
@@ -1658,7 +1785,13 @@ const tick=ms=>new Promise(r=>setTimeout(r,ms));
 async function init(){
   try{
     setLoad(8,'INITIALIZING RENDERER...');  await tick(40);
+    for(let i=0;i<FACADE_KINDS.length;i++){
+      FACADES.push(facadeTex(FACADE_KINDS[i]));
+      setLoad(8+i,'WEAVING FACADES...'); await tick(0);
+    }
     setLoad(18,'CALIBRATING HORIZON...');    await tick(30);
+    buildEnvMap();
+    setLoad(24,'PREFILTERING REFLECTIONS...'); await tick(20);
     setLoad(30,'CONSTRUCTING CITY...');
     for(let gx=0;gx<GRID;gx++){
       for(let gz=0;gz<GRID;gz++) generateBlock(gx,gz);
