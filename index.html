@@ -847,9 +847,45 @@ const TRUNK_MAT=new THREE.MeshStandardMaterial({color:0x2e2620,roughness:.95,met
 const FOLIAGE_MATS=[0x7e2a72,0x54318c,0xa33580,0x2f6f62,0x8d3f96].map(c=>
   new THREE.MeshStandardMaterial({color:c,roughness:.95,metalness:0,
     emissive:new THREE.Color(c).multiplyScalar(.30)}));
+// Sidewalks use a real scanned pack: ambientCG PavingStones038 (CC0 1.0),
+// resized to 1024/768/512 and with AO+roughness packed into one file. PAVE_TILE
+// is the world size one tile covers, chosen so the pavers read ~35 cm across.
+const PAVE_TILE=3;
+const PAVEMENT_PACK={
+  map:'textures/paving_color.webp',
+  normalMap:'textures/paving_normal.webp',
+  orm:'textures/paving_orm.webp'        // R = ambient occlusion, G = roughness
+};
 const PAVE_MAT=new THREE.MeshStandardMaterial({map:paveTex,
   normalMap:canvasNormal(paveTex,2.2),normalScale:new THREE.Vector2(.8,.8),
   roughness:.55,metalness:.25,envMapIntensity:1.0});
+
+// Swap the scans in once they arrive; the procedural canvas stays on screen
+// until then, and survives untouched if the files are missing.
+(()=>{
+  if(!PAVEMENT_PACK)return;
+  const load=(url,srgb)=>new Promise(res=>{
+    TEX_LOADER.load(url,t=>{
+      t.wrapS=t.wrapT=THREE.RepeatWrapping;
+      if(srgb)t.colorSpace=THREE.SRGBColorSpace;
+      t.anisotropy=8;
+      res(t);
+    },undefined,()=>res(null));
+  });
+  Promise.all([
+    load(PAVEMENT_PACK.map,true),
+    load(PAVEMENT_PACK.normalMap,false),
+    load(PAVEMENT_PACK.orm,false)
+  ]).then(([col,nrm,orm])=>{
+    if(col){PAVE_MAT.map=col; PAVE_MAT.color.setHex(0x8f97a8);}   // tint to night
+    if(nrm){PAVE_MAT.normalMap=nrm; PAVE_MAT.normalScale.set(1,1);}
+    if(orm){
+      PAVE_MAT.roughnessMap=orm; PAVE_MAT.aoMap=orm;
+      PAVE_MAT.roughness=1; PAVE_MAT.metalness=.08; PAVE_MAT.aoMapIntensity=.7;
+    }
+    PAVE_MAT.needsUpdate=true;
+  });
+})();
 const CURB_MAT=new THREE.MeshStandardMaterial({color:0x3c414c,roughness:.85,metalness:.1});
 
 // Fake pools of light — additive discs on the pavement, no extra real lights.
@@ -1213,8 +1249,9 @@ function addStreetProps(cx,cz){
 function addPavement(cx,cz){
   const s=BLOCK+13;
   const g=new THREE.PlaneGeometry(s,s); g.rotateX(-Math.PI/2);
-  const uv=g.attributes.uv, k=s/16;
+  const uv=g.attributes.uv, k=s/PAVE_TILE;
   for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*k,uv.getY(i)*k);
+  g.setAttribute('uv1',uv.clone());     // aoMap samples uv1, not uv
   place('PV',PAVE_MAT,g,cx,.09,cz);
   const h=.42;
   addBox('CB',CURB_MAT,s+1,h,1,cx,h/2,cz-s/2);
