@@ -375,7 +375,7 @@ const FACADES=[];   // filled during init so the loader can breathe
 // Tints so no two neighbours read the same — concrete, rust, sand, teal, plum
 // Real surface colours. These multiply an already-dark albedo and are then
 // converted sRGB->linear, so anything dim here compounds into a black void.
-const BTINTS=[0xdbdbdb, 0x9ea9bd, 0xc8a089, 0x9986ae, 0x788c9f, 0xcf997f, 0x85a08f, 0xdbdbc8, 0x646e81, 0xb08282];
+const BTINTS=[0xe0dcd2, 0xd6d0c4, 0x9ea9bd, 0xc8a089, 0xdad6cc, 0x8894a8, 0x9986ae, 0xcfc8bc, 0x788c9f, 0xcf997f, 0x85a08f, 0x646e81, 0xc4bcae, 0xa89c94];
 
 
 // ─── OPTIONAL REAL TEXTURE PACKS ─────────────────────────────────────────────
@@ -1319,11 +1319,214 @@ function addPavement(cx,cz){
   addBox('CB',CURB_MAT,1,h,s+1,cx+s/2,h/2,cz);
 }
 
+// ─── JAPANESE SIGNAGE ────────────────────────────────────────────────────────
+// Shop names as they actually appear on a Japanese street. Rendered through a
+// CJK font stack; if a viewer's system has no Japanese face the browser falls
+// back and these come out as boxes, so the latin set below stays in rotation.
+const JP_SHOPS=['ラーメン','居酒屋','焼鳥','カラオケ','薬局','喫茶','寿司','定食',
+                '古書店','電気','質屋','スナック','麻雀','銭湯','鰻','天ぷら',
+                '珈琲','酒','肉','魚','花','パン','美容室','写真'];
+const JP_FONT='"Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP","IPAGothic","MS Gothic",sans-serif';
+const SIGN_COLS=[0xff2d3a,0xffd23a,0x2de0ff,0xff6ab0,0x8cff5a,0xffffff,0xff8a1e];
+
+// Vertical hanging banner — the tate-kanban that lines every side street
+function jpBannerTex(text,col,bg){
+  const W=64,H=256;
+  const c=document.createElement('canvas'); c.width=W; c.height=H;
+  const x=c.getContext('2d');
+  const hex=n=>'#'+n.toString(16).padStart(6,'0');
+  x.fillStyle=hex(bg); x.fillRect(0,0,W,H);
+  x.strokeStyle=hex(col); x.lineWidth=3; x.strokeRect(4,4,W-8,H-8);
+  x.font='36px '+JP_FONT;
+  x.textAlign='center'; x.textBaseline='middle';
+  x.shadowColor=hex(col); x.shadowBlur=16; x.fillStyle=hex(col);
+  const chars=[...text].slice(0,5);
+  const step=Math.min(44,(H-40)/chars.length);
+  chars.forEach((ch,i)=>{
+    const y=H/2-(chars.length-1)*step/2+i*step;
+    x.fillText(ch,W/2,y);
+    x.shadowBlur=5; x.fillText(ch,W/2,y); x.shadowBlur=16;
+  });
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
+}
+// Horizontal shop fascia
+function jpFasciaTex(text,col,bg){
+  const W=256,H=64;
+  const c=document.createElement('canvas'); c.width=W; c.height=H;
+  const x=c.getContext('2d');
+  const hex=n=>'#'+n.toString(16).padStart(6,'0');
+  x.fillStyle=hex(bg); x.fillRect(0,0,W,H);
+  x.font='42px '+JP_FONT;
+  x.textAlign='center'; x.textBaseline='middle';
+  x.shadowColor=hex(col); x.shadowBlur=18; x.fillStyle=hex(col);
+  x.fillText(text,W/2,H/2+2);
+  x.shadowBlur=5; x.fillText(text,W/2,H/2+2);
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
+}
+// Pooled so a few hundred shops share a handful of textures
+const BANNER_MATS=[],FASCIA_MATS=[];
+const SIGN_ANIM=[];        // pooled sign materials, pulsed as a group
+function buildSignPools(){
+  for(let i=0;i<14;i++){
+    const col=pick(SIGN_COLS), bg=pick([0x0a0a0c,0x140608,0x0c1014,0x1a0d04]);
+    const bm=new THREE.MeshBasicMaterial({map:jpBannerTex(pick(JP_SHOPS),col,bg),
+      side:THREE.DoubleSide,transparent:true,depthWrite:false});
+    const fm=new THREE.MeshBasicMaterial({map:jpFasciaTex(pick(JP_SHOPS),col,bg),
+      side:THREE.DoubleSide,transparent:true,depthWrite:false});
+    bm.userData.phase=Math.random()*Math.PI*2;
+    fm.userData.phase=Math.random()*Math.PI*2;
+    SIGN_ANIM.push(bm,fm);
+    BANNER_MATS.push(bm); FASCIA_MATS.push(fm);
+  }
+}
+
+// ─── SHOPFRONT ROW ───────────────────────────────────────────────────────────
+// The thing a city needs to feel inhabited is frontage at human scale: warm
+// interiors spilling onto the pavement, awnings, shutters, signage at eye
+// level. Towers alone read as scenery, not a place.
+const SHOP_WALL=[0xe8e4dc,0xd8d2c4,0xf0eee8,0xc9c4b8,0xe0d8cc].map(
+  c=>new THREE.MeshStandardMaterial({color:c,roughness:.85,metalness:.05}));
+const SHOP_GLOW=[0xffdca8,0xfff0d0,0xffe8b0,0xd8f0ff].map(
+  c=>new THREE.MeshBasicMaterial({color:c}));
+const SHUTTER_MAT=new THREE.MeshStandardMaterial({color:0x6a6f78,roughness:.7,metalness:.5});
+const AWNING=[0x9c2f28,0x1f5f4a,0x2c4b88,0xb5741e,0x6a2f6a,0xc9c4b8].map(
+  c=>new THREE.MeshStandardMaterial({color:c,roughness:.9,metalness:.02}));
+const VEND_GLOW=[0xff3a3a,0x3aa0ff,0xffffff].map(c=>new THREE.MeshBasicMaterial({color:c}));
+
+function vendingMachine(x,z,ry){
+  addBox('SHW0',SHOP_WALL[0],1.9,2.0,.9,x,1.0,z,ry);
+  const vi=Math.random()*VEND_GLOW.length|0;
+  place('VG'+vi,VEND_GLOW[vi],new THREE.BoxGeometry(1.5,1.3,.12),
+        x+Math.sin(ry)*.5,1.25,z+Math.cos(ry)*.5,ry);
+  if(Math.random()<.5)lightPool(x+Math.sin(ry)*1.6,z+Math.cos(ry)*1.6,2.4,1);
+}
+
+// One shop unit, built in local space then rotated onto the block edge
+function shopUnit(bx,bz,ry,w,depth){
+  const S=(gx,gy,gz)=>[bx+Math.cos(ry)*gx-Math.sin(ry)*gz, gy, bz+Math.sin(ry)*gx+Math.cos(ry)*gz];
+  const wi=Math.random()*SHOP_WALL.length|0;
+  const storeys=Math.random()<.45?2:1;
+  const h=storeys===2?rnd(6.4,8.0):rnd(3.8,4.8);
+
+  // shell
+  let p=S(0,h/2,0);
+  addBox('SHW'+wi,SHOP_WALL[wi],w,h,depth,p[0],p[1],p[2],ry);
+  // parapet
+  p=S(0,h+.35,0);
+  addBox('CB',CURB_MAT,w+.5,.7,depth+.5,p[0],p[1],p[2],ry);
+  // tiled plinth — stops the frontage reading as one blank slab
+  p=S(0,.45,depth/2+.05);
+  addBox('CB',CURB_MAT,w,.9,.28,p[0],p[1],p[2],ry);
+  // party wall between neighbours
+  p=S(w/2,h/2,depth/2+.02);
+  addBox('CB',CURB_MAT,.22,h,.35,p[0],p[1],p[2],ry);
+  // service riser and meter box down one side
+  if(Math.random()<.6){
+    p=S(rnd(-.4,.4)*w,h*.5,depth/2+.18);
+    place('G',GREEBLE_MAT,new THREE.CylinderGeometry(.11,.11,h*.85,6),p[0],p[1],p[2]);
+  }
+  if(Math.random()<.45){
+    p=S(rnd(-.35,.35)*w,2.9,depth/2+.22);
+    addBox('G',GREEBLE_MAT,.55,.7,.3,p[0],p[1],p[2],ry);
+  }
+
+  const front=depth/2+.06;
+  if(Math.random()<.72){
+    // open shop: glowing interior behind glass, warm spill on the pavement
+    const gw=w-1.2, gh=2.6;
+    const gi=Math.random()*SHOP_GLOW.length|0;
+    p=S(0,1.65,front);
+    place('SG'+gi,SHOP_GLOW[gi],new THREE.BoxGeometry(gw,gh,.1),p[0],p[1],p[2],ry);
+    if(Math.random()<.35){                    // sparingly: these blend additively
+      p=S(0,1.65,front+.9);
+      lightPool(p[0],p[2],rnd(2.8,4.2),0);
+    }
+    // awning
+    if(Math.random()<.62){
+      const ai=Math.random()*AWNING.length|0;
+      p=S(0,3.35,front+.85);
+      addBox('AW'+ai,AWNING[ai],w-.4,.16,1.9,p[0],p[1],p[2],ry);
+      p=S(0,3.05,front+1.75);
+      addBox('AW'+ai,AWNING[ai],w-.4,.75,.14,p[0],p[1],p[2],ry);
+    }
+  }else{
+    // closed: corrugated roller shutter
+    p=S(0,1.6,front);
+    addBox('SHUT',SHUTTER_MAT,w-1.0,3.0,.14,p[0],p[1],p[2],ry);
+  }
+
+  // doorway offset to one side, dark against the lit window
+  {
+    const dx=(Math.random()<.5?-1:1)*(w/2-.85);
+    p=S(dx,1.05,front+.02);
+    addBox('SHUT',SHUTTER_MAT,1.0,2.1,.1,p[0],p[1],p[2],ry);
+  }
+  // fascia sign above the opening
+  if(Math.random()<.8){
+    const fi=Math.random()*FASCIA_MATS.length|0;
+    p=S(0,h*(storeys===2?.62:.82),front+.12);
+    place('FAS'+fi,FASCIA_MATS[fi],new THREE.PlaneGeometry(w-.3,1.9),p[0],p[1],p[2],ry);
+  }
+  // projecting vertical banner
+  if(Math.random()<.55){
+    const bi=Math.random()*BANNER_MATS.length|0;
+    p=S(rnd(-.25,.25)*w,h*.52,front+1.35);
+    place('BAN'+bi,BANNER_MATS[bi],new THREE.PlaneGeometry(1.3,4.2),
+          p[0],p[1],p[2],ry+Math.PI/2);
+  }
+  // upper-floor window
+  if(storeys===2){
+    p=S(rnd(-.2,.2)*w,h*.75,front);
+    place('SG0',SHOP_GLOW[Math.random()<.5?0:3],
+          new THREE.BoxGeometry(w*.55,1.5,.08),p[0],p[1],p[2],ry);
+    // aircon box
+    p=S(rnd(-.3,.3)*w,h*.62,front-.1);
+    addBox('G',GREEBLE_MAT,1.1,.8,.7,p[0],p[1],p[2],ry);
+  }
+}
+
+// Line the road-facing edges of a block with shops
+function shopRow(cx,cz){
+  const depth=5.5;
+  const inset=BLOCK/2+2.5-depth/2;
+  const sides=[[0,1],[Math.PI,-1],[Math.PI/2,0],[-Math.PI/2,0]];
+  // two of the four edges, so blocks stay varied and geometry stays bounded
+  const chosen=[0,1,2,3].sort(()=>Math.random()-.5).slice(0,2);
+  chosen.forEach(si=>{
+    const span=BLOCK-8;
+    let t=-span/2;
+    while(t<span/2-5){
+      const w=rnd(4.5,8);
+      if(t+w>span/2)break;
+      const c=t+w/2;
+      let x,z,ry;
+      if(si===0){x=cx+c; z=cz-inset; ry=Math.PI;}
+      else if(si===1){x=cx+c; z=cz+inset; ry=0;}
+      else if(si===2){x=cx-inset; z=cz+c; ry=Math.PI/2;}
+      else            {x=cx+inset; z=cz+c; ry=-Math.PI/2;}
+      shopUnit(x,z,ry,w-.5,depth);
+      t+=w+rnd(.2,1.0);
+    }
+    // a vending machine or two out on the kerb
+    if(Math.random()<.5){
+      const c=rnd(-.35,.35)*span;
+      let x,z,ry;
+      const out=BLOCK/2+3.2;
+      if(si===0){x=cx+c; z=cz-out; ry=Math.PI;}
+      else if(si===1){x=cx+c; z=cz+out; ry=0;}
+      else if(si===2){x=cx-out; z=cz+c; ry=Math.PI/2;}
+      else            {x=cx+out; z=cz+c; ry=-Math.PI/2;}
+      vendingMachine(x,z,ry);
+    }
+  });
+}
+
 // ─── BLOCKS ──────────────────────────────────────────────────────────────────
 function generateBlock(gx,gz){
   const cx=-HALF+gx*CELL+ROAD+BLOCK/2;
   const cz=-HALF+gz*CELL+ROAD+BLOCK/2;
   addPavement(cx,cz);
+  shopRow(cx,cz);
 
   if(Math.random()<.07){
     // Park / plaza
@@ -1850,6 +2053,11 @@ function updateAnim(t,dt){
     const v=.85+.15*Math.sin(t*1.8+m.userData.phase);
     m.material.opacity=v;
   });
+  // Shop signage: a few dozen shared materials rather than ~1800 meshes
+  for(let i=0;i<SIGN_ANIM.length;i++){
+    const m=SIGN_ANIM[i];
+    m.opacity=.88+.12*Math.sin(t*1.6+m.userData.phase);
+  }
   // Antenna blinks
   blinkLights.forEach(b=>{
     const on=Math.sin(t*b.userData.rate*Math.PI*2+b.userData.phase)>.5;
@@ -1888,6 +2096,7 @@ async function init(){
     setLoad(18,'CALIBRATING HORIZON...');    await tick(30);
     buildEnvMap();
     setLoad(24,'PREFILTERING REFLECTIONS...'); await tick(20);
+    buildSignPools();
     setLoad(30,'CONSTRUCTING CITY...');
     for(let gx=0;gx<GRID;gx++){
       for(let gz=0;gz<GRID;gz++) generateBlock(gx,gz);
