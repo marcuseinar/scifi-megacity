@@ -136,6 +136,45 @@ composer.addPass(bloom);
 function rnd(a,b){return a+Math.random()*(b-a)}
 function pick(arr){return arr[Math.floor(Math.random()*arr.length)]}
 
+
+// ─── SCANNED MATERIAL PACKS ──────────────────────────────────────────────────
+// CC0 scans from ambientCG, resized and channel-packed (see textures/CREDITS).
+// Each pack loads lazily and overwrites the procedural material once it lands,
+// so a blocked or missing download degrades to the generated look.
+const PACKS={
+  tarmac   :{dir:'textures/tarmac',    tile:14},
+  concrete :{dir:'textures/concrete',  tile:6},
+  rustplate:{dir:'textures/rustplate', tile:9}
+};
+const packLoader=new THREE.TextureLoader();
+const packCache=new Map();
+function packMap(name,suffix,srgb){
+  const url=`${PACKS[name].dir}_${suffix}.webp`;
+  let t=packCache.get(url);
+  if(!t){
+    t=packLoader.load(url,tx=>{tx.needsUpdate=true;},undefined,()=>{});
+    t.wrapS=t.wrapT=THREE.RepeatWrapping;
+    if(srgb)t.colorSpace=THREE.SRGBColorSpace;
+    t.anisotropy=8;
+    packCache.set(url,t);
+  }
+  return t;
+}
+// Point a standard material at a pack. `tint` keeps the night palette, since
+// the scans are lit for daylight and read far too bright straight out of the box.
+function usePack(mat,name,{tint=0xffffff,normalScale=1,rough=1,metal=1,env=1,repeat=0}={}){
+  mat.map=packMap(name,'color',true);
+  mat.normalMap=packMap(name,'normal',false);
+  const orm=packMap(name,'orm',false);
+  mat.roughnessMap=orm; mat.metalnessMap=orm;
+  if(repeat)[mat.map,mat.normalMap,orm].forEach(t=>t.repeat.set(repeat,repeat));
+  mat.color.setHex(tint);
+  mat.normalScale=new THREE.Vector2(normalScale,normalScale);
+  mat.roughness=rough; mat.metalness=metal; mat.envMapIntensity=env;
+  mat.needsUpdate=true;
+  return mat;
+}
+
 // ─── DERIVED SURFACE MAPS ────────────────────────────────────────────────────
 // Treat the albedo's luminance as a height field: window reveals, panel seams,
 // ribs and corrugation all become real relief under the lighting.
@@ -706,12 +745,12 @@ const paveTex=canvasTex(256,256,x=>{
   }
 },1);
 
-const ground=new THREE.Mesh(
-  new THREE.PlaneGeometry(2600,2600),
-  new THREE.MeshStandardMaterial({map:asphaltTex,color:0xffffff,
-    normalMap:canvasNormal(asphaltTex,1.6),normalScale:new THREE.Vector2(.5,.5),
-    roughness:.34,metalness:.5,envMapIntensity:1.25})
-);
+const GROUND_MAT=new THREE.MeshStandardMaterial({map:asphaltTex,color:0xffffff,
+  normalMap:canvasNormal(asphaltTex,1.6),normalScale:new THREE.Vector2(.5,.5),
+  roughness:.34,metalness:.5,envMapIntensity:1.25});
+usePack(GROUND_MAT,'tarmac',{tint:0x6d7684,normalScale:.7,rough:1,metal:.35,env:1.25,
+  repeat:2600/PACKS.tarmac.tile});
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(2600,2600),GROUND_MAT);
 ground.rotation.x=-Math.PI/2; scene.add(ground);
 
 // Lane markings down the middle of every road
@@ -745,8 +784,19 @@ function place(key,mat,g,x,y,z,ry){
   g.translate(x,y,z);
   pushGeo(key,mat,g);
 }
+const BOX_TILE=6;   // world units one texture tile covers on structural boxes
 function addBox(key,mat,w,h,d,x,y,z,ry){
-  place(key,mat,new THREE.BoxGeometry(w,h,d),x,y,z,ry);
+  const g=new THREE.BoxGeometry(w,h,d);
+  // Without this a scanned map stretches across a whole skyway deck. Faces are
+  // ordered px,nx,py,ny,pz,nz — width comes from d on the x faces, w elsewhere.
+  const uv=g.attributes.uv;
+  const ou=Math.random()*3, ov=Math.random()*3;
+  const su=[d,d,w,w,w,w], sv=[h,h,d,d,h,h];
+  for(let f=0;f<6;f++)for(let i=0;i<4;i++){
+    const k=f*4+i;
+    uv.setXY(k,uv.getX(k)*su[f]/BOX_TILE+ou,uv.getY(k)*sv[f]/BOX_TILE+ov);
+  }
+  place(key,mat,g,x,y,z,ry);
 }
 function flushBuckets(){
   BUCKETS.forEach(b=>{
@@ -831,11 +881,17 @@ function facadeMat(fi,ti){
   return m;
 }
 // Weathered concrete + the blocky primary accents of a mega-block
-const CONC_MATS=[0x7d8490,0x565d68,0x373d47,0x21262e].map(
+const CONC_TINTS=[0x7d8490,0x565d68,0x373d47,0x21262e];
+const CONC_MATS=CONC_TINTS.map(
   c=>new THREE.MeshStandardMaterial({color:c,roughness:.92,metalness:.08,envMapIntensity:.7}));
+CONC_MATS.forEach((m,i)=>usePack(m,'concrete',
+  {tint:CONC_TINTS[i],normalScale:.8,rough:1,metal:.05,env:.7}));
+
 const ACC_MATS=[0x9c2f28,0xc09028,0x2c5688,0xad4a22,0x27705f,0x63308a,0xa8a396].map(
   c=>new THREE.MeshStandardMaterial({color:c,roughness:.78,metalness:.15}));
 const GREEBLE_MAT=new THREE.MeshStandardMaterial({color:0x232a36,roughness:.55,metalness:.65,envMapIntensity:1.1});
+// Rusted plate on the industrial greebles — rooftop kit, masts, pylons, tanks
+usePack(GREEBLE_MAT,'rustplate',{tint:0x6b6f74,normalScale:1,rough:1,metal:1,env:1.1});
 const RUST_MAT=new THREE.MeshStandardMaterial({color:0x4a3228,roughness:.9,metalness:.2});
 // Architectural light strips are dimmed — there are a lot of them
 const STRIP_MATS=NEONS.map(c=>new THREE.MeshBasicMaterial({color:new THREE.Color(c).multiplyScalar(.38)}));

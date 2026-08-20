@@ -1,5 +1,24 @@
 # Texture credits
 
+All materials are **CC0 1.0** scans from [ambientCG](https://ambientcg.com) —
+public domain, no attribution required (credited here anyway). Each was resized
+from the original 2K release and channel-packed for the web; the four packs
+together are ~900 KB rather than the ~120 MB they ship as.
+
+Every `*_orm.webp` packs several greyscale maps into one file: **R = ambient
+occlusion, G = roughness, B = metalness**. Those are the exact channels three.js
+reads for `aoMap`, `roughnessMap` and `metalnessMap`, so one texture feeds up to
+three slots. `NormalGL` is always used over `NormalDX` — three.js expects the
+OpenGL convention, and the DirectX variant renders relief inverted.
+
+| Pack | Source | Used for | Tile |
+|---|---|---|---|
+| `tarmac_*` | Asphalt014 | Roadway | 14 m |
+| `concrete_*` | Concrete016 | Cornices, ribs, skyway decks, pylon caps | 6 m |
+| `rustplate_*` | Metal022 | Rooftop machinery, masts, tanks, pylons | 9 m |
+| `paving_*` | PavingStones038 | Sidewalks | 3 m |
+
+
 ## Sidewalk paving — `paving_color.webp`, `paving_normal.webp`, `paving_orm.webp`
 
 **Source:** PavingStones038 from [ambientCG](https://ambientcg.com), 2K JPG release
