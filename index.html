@@ -1755,36 +1755,95 @@ function addSkyways(){
 const cars=[];
 
 // Shared car materials — created once, reused across all cars
-const CAR_MATS=[0x334466,0x553333,0x335533,0x444455,0x553355,0x224488,0x445544].map(
-  c=>new THREE.MeshBasicMaterial({color:c})
-);
-const CAR_CABIN_MAT=new THREE.MeshBasicMaterial({color:0x0a1520});
-const CAR_HL_MAT=new THREE.MeshBasicMaterial({color:0xffffff});
-const CAR_TL_MAT=new THREE.MeshBasicMaterial({color:0xff1100});
+// ─── VEHICLES ────────────────────────────────────────────────────────────────
+// Each car used to be a Group of six meshes — 240 draw calls for forty cars,
+// and the silhouette was a box on a box. Parts are now merged into two
+// geometries per car (paint and lights), so a far more detailed vehicle costs
+// two calls instead of six, and colour rides in vertex data on a shared
+// material rather than one material per body colour.
+const CAR_PAINT=[0x9fb2c8,0x2b3442,0xb9c2c9,0x6d2f34,0x2f4a6d,0xd8d8d2,
+                 0x3a5a45,0x8a8f96,0x1f2530,0xc7a34a];
+const CAR_BODY_MAT=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.38,metalness:.55,envMapIntensity:1.1});
+const CAR_LIGHT_MAT=new THREE.MeshBasicMaterial({vertexColors:true});
+const FLY_HL_MAT=new THREE.MeshBasicMaterial({color:0xfff2d0});   // flying cars keep a plain lamp
 
-// Shared car geometries
-const CAR_BODY_GEO=new THREE.BoxGeometry(3.5,1.3,7.5);
-const CAR_CAB_GEO=new THREE.BoxGeometry(2.8,1.1,3.8);
-const CAR_LIGHT_GEO=new THREE.BoxGeometry(.4,.25,.2);
+function tintGeo(g,hex){
+  const c=new THREE.Color(hex);
+  const n=g.attributes.position.count;
+  const arr=new Float32Array(n*3);
+  for(let i=0;i<n;i++){arr[i*3]=c.r;arr[i*3+1]=c.g;arr[i*3+2]=c.b;}
+  g.setAttribute('color',new THREE.BufferAttribute(arr,3));
+  return g;
+}
+function boxAt(w,h,d,x,y,z,hex,ry){
+  const g=new THREE.BoxGeometry(w,h,d);
+  if(ry)g.rotateY(ry);
+  g.translate(x,y,z);
+  return tintGeo(g,hex);
+}
+function wheelAt(r,x,y,z){
+  const g=new THREE.CylinderGeometry(r,r,.24,10);
+  g.rotateZ(Math.PI/2); g.translate(x,y,z);
+  return tintGeo(g,0x121418);
+}
+
+// type: 0 saloon, 1 kei van, 2 kei truck, 3 taxi
+function buildCar(type,paint){
+  const body=[],lights=[];
+  const glass=0x121c26;
+  if(type===1){                                   // tall boxy kei van
+    body.push(boxAt(3.2,2.5,6.4,0,1.35,0,paint));
+    body.push(boxAt(3.24,1.15,3.4,0,1.95,.6,glass));
+    body.push(boxAt(3.3,.35,6.5,0,.35,0,0x20242c));
+    body.push(wheelAt(.5,-1.6,.5,2.0),wheelAt(.5,1.6,.5,2.0),
+              wheelAt(.5,-1.6,.5,-2.1),wheelAt(.5,1.6,.5,-2.1));
+    lights.push(boxAt(.7,.3,.16,-1.1,1.0,3.24,0xfff2d0),
+                boxAt(.7,.3,.16,1.1,1.0,3.24,0xfff2d0),
+                boxAt(.6,.3,.16,-1.1,1.3,-3.24,0xff2a12),
+                boxAt(.6,.3,.16,1.1,1.3,-3.24,0xff2a12));
+  }else if(type===2){                             // kei truck with a flat bed
+    body.push(boxAt(3.0,1.9,2.6,0,1.15,1.7,paint));
+    body.push(boxAt(3.04,.95,2.2,0,1.6,1.9,glass));
+    body.push(boxAt(3.0,.55,4.0,0,.75,-1.2,paint));
+    body.push(boxAt(3.0,.7,.18,0,1.15,-3.15,paint));
+    body.push(wheelAt(.46,-1.5,.46,2.0),wheelAt(.46,1.5,.46,2.0),
+              wheelAt(.46,-1.5,.46,-2.2),wheelAt(.46,1.5,.46,-2.2));
+    lights.push(boxAt(.55,.28,.16,-1.0,.95,3.04,0xfff2d0),
+                boxAt(.55,.28,.16,1.0,.95,3.04,0xfff2d0),
+                boxAt(.5,.26,.16,-1.2,1.1,-3.3,0xff2a12),
+                boxAt(.5,.26,.16,1.2,1.1,-3.3,0xff2a12));
+  }else{                                          // saloon, and the taxi variant
+    body.push(boxAt(3.3,1.05,7.0,0,.85,0,paint));
+    body.push(boxAt(3.0,.85,3.6,0,1.62,-.35,paint));
+    body.push(boxAt(3.04,.62,3.3,0,1.68,-.3,glass));
+    body.push(boxAt(3.36,.3,6.6,0,.42,0,0x1a1e24));
+    body.push(wheelAt(.48,-1.65,.48,2.3),wheelAt(.48,1.65,.48,2.3),
+              wheelAt(.48,-1.65,.48,-2.3),wheelAt(.48,1.65,.48,-2.3));
+    lights.push(boxAt(.85,.26,.16,-1.05,.95,3.52,0xfff2d0),
+                boxAt(.85,.26,.16,1.05,.95,3.52,0xfff2d0),
+                boxAt(.75,.24,.16,-1.05,1.0,-3.52,0xff2a12),
+                boxAt(.75,.24,.16,1.05,1.0,-3.52,0xff2a12));
+    if(type===3){                                 // lit roof sign
+      body.push(boxAt(.9,.16,.5,0,2.06,-.3,0x2a2f38));
+      lights.push(boxAt(.86,.34,.44,0,2.28,-.3,0xffd45a));
+    }
+  }
+  // a little light spilling onto the road under the sills
+  lights.push(boxAt(2.4,.06,5.2,0,.16,0,type===3?0xffb040:0x2f6fa8));
+  return {body:mergeGeometries(body,false),lights:mergeGeometries(lights,false)};
+}
 
 function spawnCars(){
   for(let i=0;i<40;i++){
+    const taxi=Math.random()<.18;
+    const type=taxi?3:(Math.random()<.28?1:(Math.random()<.22?2:0));
+    const paint=taxi?0xf0c94a:pick(CAR_PAINT);
+    const parts=buildCar(type,paint);
     const g=new THREE.Group();
-    // Body — just add the mesh, no Object.assign needed
-    const body=new THREE.Mesh(CAR_BODY_GEO,pick(CAR_MATS));
-    g.add(body);
-    // Cabin
-    const cab=new THREE.Mesh(CAR_CAB_GEO,CAR_CABIN_MAT);
-    cab.position.set(0,1.2,-0.4); g.add(cab);
-    // Headlights / taillights — shared geo + mat
-    [-1.2,1.2].forEach(sx=>{
-      const hl=new THREE.Mesh(CAR_LIGHT_GEO,CAR_HL_MAT);
-      hl.position.set(sx,0,3.7); g.add(hl);
-      const tl=new THREE.Mesh(CAR_LIGHT_GEO,CAR_TL_MAT);
-      tl.position.set(sx,0,-3.7); g.add(tl);
-    });
+    g.add(new THREE.Mesh(parts.body,CAR_BODY_MAT));
+    g.add(new THREE.Mesh(parts.lights,CAR_LIGHT_MAT));
 
-    g.position.y=1.2;
+    g.position.y=0;
     const horiz=Math.random()>.5;
     const ri=Math.floor(Math.random()*GRID);
     const rp=-HALF+ri*CELL+ROAD/2+Math.random()*4-2;
@@ -1792,12 +1851,12 @@ function spawnCars(){
     const dir=Math.random()>.5?1:-1;
     const lane=dir*(4+Math.random()*4);
     if(horiz){
-      g.position.set(sp,1.2,rp+lane);
-      g.rotation.y=dir>0?0:Math.PI;
+      g.position.set(sp,0,rp+lane);
+      g.rotation.y=dir>0?Math.PI/2:-Math.PI/2;
       g.userData={axis:'x',spd:(15+Math.random()*25)*dir};
     }else{
-      g.position.set(rp+lane,1.2,sp);
-      g.rotation.y=dir>0?-Math.PI/2:Math.PI/2;
+      g.position.set(rp+lane,0,sp);
+      g.rotation.y=dir>0?0:Math.PI;
       g.userData={axis:'z',spd:(15+Math.random()*25)*dir};
     }
     scene.add(g); cars.push(g);
@@ -1857,7 +1916,7 @@ function spawnFlyingCars(){
     );
     ul.rotation.x=Math.PI/2; ul.position.y=-.6; g.add(ul);
     // Headlight
-    const fhl=new THREE.Mesh(new THREE.BoxGeometry(.6,.3,.2),CAR_HL_MAT);
+    const fhl=new THREE.Mesh(new THREE.BoxGeometry(.6,.3,.2),FLY_HL_MAT);
     fhl.position.set(0,0,3.3); g.add(fhl);
 
     const alt=rnd(30,120);
