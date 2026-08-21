@@ -1521,6 +1521,87 @@ function shopRow(cx,cz){
   });
 }
 
+// ─── LOT SUBDIVISION ─────────────────────────────────────────────────────────
+// Three fixed layouts repeated across a hundred identical blocks is what read as
+// artificial — far more than any texture did. Blocks are now cut into irregular
+// plots by recursive binary split, occasionally leaving a gap between halves
+// that becomes a back alley. Roads, traffic lanes and the minimap are untouched,
+// so none of the systems that assume a fixed grid have to change.
+const MIN_LOT=15;
+
+function splitLots(x,z,w,d,depth,lots,alleys){
+  const tooSmall=w<MIN_LOT*2.1&&d<MIN_LOT*2.1;
+  if(depth<=0||tooSmall||(depth<3&&Math.random()<.28)){
+    lots.push({x,z,w,d});
+    return;
+  }
+  // split the longer side, but not always — that alone is a visible rhythm
+  let horiz=w>d;
+  if(Math.random()<.22)horiz=!horiz;
+  const span=horiz?w:d;
+  // sometimes leave a slot between the halves for an alley
+  const gap=(depth>=2&&span>44&&Math.random()<.34)?rnd(3.2,5.4):0;
+  const usable=span-gap;
+  const f=rnd(.34,.66);
+  const a=usable*f, b=usable-a;
+  if(a<MIN_LOT||b<MIN_LOT){ lots.push({x,z,w,d}); return; }
+
+  if(horiz){
+    splitLots(x-w/2+a/2,z,a,d,depth-1,lots,alleys);
+    splitLots(x+w/2-b/2,z,b,d,depth-1,lots,alleys);
+    if(gap)alleys.push({x:x-w/2+a+gap/2,z,w:gap,d,horiz:false});
+  }else{
+    splitLots(x,z-d/2+a/2,w,a,depth-1,lots,alleys);
+    splitLots(x,z+d/2-b/2,w,b,depth-1,lots,alleys);
+    if(gap)alleys.push({x,z:z-d/2+a+gap/2,w,d:gap,horiz:true});
+  }
+}
+
+// A back alley: damp ground, a bare bulb or two, pipework, extractor fans and
+// the odd sign facing into a space three metres wide.
+function dressAlley(al){
+  const long=al.horiz?al.w:al.d;
+  const n=Math.max(1,Math.round(long/14));
+  for(let i=0;i<n;i++){
+    const t=(i+.5)/n*long-long/2;
+    const ax=al.x+(al.horiz?t:0), az=al.z+(al.horiz?0:t);
+    if(Math.random()<.75){                       // bulb strung over the alley
+      place('LAMP',LAMP_MAT,new THREE.SphereGeometry(.22,6,5),ax,rnd(3.4,4.6),az);
+      lightPool(ax,az,rnd(2.6,3.8),Math.random()<.5?0:2);
+    }
+    if(Math.random()<.6){                        // extractor fan / condenser
+      const side=(Math.random()<.5?-1:1)*(al.horiz?al.d:al.w)/2;
+      addBox('G',GREEBLE_MAT,1.0,.9,.6,
+             ax+(al.horiz?0:side),rnd(2.2,3.4),az+(al.horiz?side:0));
+    }
+    if(Math.random()<.5){                        // crates and bins
+      addBox('CB',CURB_MAT,rnd(.7,1.2),rnd(.6,1.1),rnd(.7,1.2),
+             ax+rnd(-.8,.8),.5,az+rnd(-.8,.8),Math.random()*3);
+    }
+    if(Math.random()<.35){                        // a sign facing into the alley
+      const bi=Math.random()*BANNER_MATS.length|0;
+      const side=(Math.random()<.5?-1:1)*((al.horiz?al.d:al.w)/2-.2);
+      place('BAN'+bi,BANNER_MATS[bi],new THREE.PlaneGeometry(.9,2.8),
+            ax+(al.horiz?0:side),rnd(3.0,4.2),az+(al.horiz?side:0),
+            al.horiz?0:Math.PI/2);
+    }
+  }
+}
+
+// Vacant plot: hoarding, gravel, a parked van, vending machines
+function vacantLot(l){
+  const g=new THREE.PlaneGeometry(l.w-1,l.d-1); g.rotateX(-Math.PI/2);
+  place('PV',PAVE_MAT,g,l.x,.11,l.z);
+  const hh=2.2;
+  addBox('SHUT',SHUTTER_MAT,l.w-1,hh,.16,l.x,hh/2,l.z-l.d/2+.5);
+  addBox('SHUT',SHUTTER_MAT,l.w-1,hh,.16,l.x,hh/2,l.z+l.d/2-.5);
+  addBox('SHUT',SHUTTER_MAT,.16,hh,l.d-1,l.x-l.w/2+.5,hh/2,l.z);
+  addBox('SHUT',SHUTTER_MAT,.16,hh,l.d-1,l.x+l.w/2-.5,hh/2,l.z);
+  if(Math.random()<.6)lightPool(l.x,l.z,Math.min(l.w,l.d)*.4,3);
+  place('Gr',GREEBLE_MAT,new THREE.CylinderGeometry(.13,.13,7,6),
+        l.x+l.w/2-1.6,3.5,l.z-l.d/2+1.6);
+}
+
 // ─── BLOCKS ──────────────────────────────────────────────────────────────────
 function generateBlock(gx,gz){
   const cx=-HALF+gx*CELL+ROAD+BLOCK/2;
@@ -1546,26 +1627,32 @@ function generateBlock(gx,gz){
   const dc=Math.min(1,Math.hypot(cx,cz)/HALF);
   const scale=1.45-dc*1.0;
 
-  const layouts=[
-    [{x:0,z:0,ws:.88,ds:.88}],
-    [{x:-.22,z:0,ws:.46,ds:.9},{x:.25,z:0,ws:.42,ds:.9}],
-    [{x:-.24,z:-.22,ws:.44,ds:.5},{x:.24,z:-.22,ws:.42,ds:.5},{x:0,z:.24,ws:.9,ds:.42}],
-  ];
-  const lay=layouts[Math.floor(Math.random()*layouts.length)];
+  // Buildable area stops short of the kerb so the shopfront strip has room
+  const BUILD=BLOCK-15;
+  const lots=[],alleys=[];
+  splitLots(cx,cz,BUILD,BUILD,2+Math.floor(Math.random()*3),lots,alleys);
+  alleys.forEach(dressAlley);
   const made=[];
 
-  lay.forEach(l=>{
-    const bw=l.ws*BLOCK*(.85+Math.random()*.15);
-    const bd=l.ds*BLOCK*(.85+Math.random()*.15);
-    let bh=(12+Math.pow(Math.random(),1.7)*210)*scale;
-    if(Math.random()<.05)bh*=1.9;                 // occasional landmark spike
-    bh=Math.max(11,bh);
+  lots.forEach(l=>{
+    if(l.w<MIN_LOT*1.15&&l.d<MIN_LOT*1.15&&Math.random()<.22){ vacantLot(l); return; }
+    // buildings sit off their lot lines by a little, so the street wall is ragged
+    const bw=Math.max(8,l.w-rnd(1.2,4.5));
+    const bd=Math.max(8,l.d-rnd(1.2,4.5));
+    const ox=rnd(-1,1)*Math.max(0,(l.w-bw)/2), oz=rnd(-1,1)*Math.max(0,(l.d-bd)/2);
+    // smaller plots carry lower buildings — that correlation is what makes a
+    // subdivided block read as a neighbourhood rather than noise
+    const lotFrac=Math.min(1,(l.w*l.d)/(BUILD*BUILD*.55));
+    let bh=(9+Math.pow(Math.random(),1.7)*200*(.35+.65*lotFrac))*scale;
+    if(Math.random()<.04)bh*=1.9;                 // occasional landmark spike
+    bh=Math.max(9,bh);
     let style;
     if(bh<40)      style=pick(['stack','ring','podium','setback']);
     else if(bh<110)style=pick(['stack','setback','podium','core','taper']);
     else           style=pick(['setback','taper','core','podium','stack']);
     if(Math.min(bw,bd)<26&&style==='ring')style='stack';
-    made.push(addBuilding(cx+l.x*BLOCK*.5,cz+l.z*BLOCK*.5,bw,bd,bh,style));
+    if(Math.min(bw,bd)<20&&style==='core')style='stack';
+    made.push(addBuilding(l.x+ox,l.z+oz,bw,bd,bh,style));
   });
 
   // Skybridge between two towers in the same block
