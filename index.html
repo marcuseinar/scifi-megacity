@@ -755,15 +755,8 @@ usePack(GROUND_MAT,'tarmac',{tint:0x6d7684,normalScale:.7,rough:1,metal:.35,env:
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(2600,2600),GROUND_MAT);
 ground.rotation.x=-Math.PI/2; scene.add(ground);
 
-// Lane markings down the middle of every road
-const lmat=new THREE.MeshBasicMaterial({color:0x3a3d47});
-for(let i=0;i<=GRID;i++){
-  const p=-HALF+i*CELL+ROAD/2;
-  const hg=new THREE.Mesh(new THREE.PlaneGeometry(CITY,1.2),lmat);
-  hg.rotation.x=-Math.PI/2; hg.position.set(0,.06,p); scene.add(hg);
-  const vg=new THREE.Mesh(new THREE.PlaneGeometry(1.2,CITY),lmat);
-  vg.rotation.x=-Math.PI/2; vg.position.set(p,.06,0); scene.add(vg);
-}
+// Lane markings are laid by the city plan, which knows where the roads are
+const LINE_MAT=new THREE.MeshBasicMaterial({color:0x3a3d47});
 
 // ─── CITY GENERATION ─────────────────────────────────────────────────────────
 const neonMeshes=[];   // for animation
@@ -1281,12 +1274,14 @@ function streetLamp(x,z,dir){
   place('LAMP',LAMP_MAT,new THREE.SphereGeometry(.5,8,8),x+dir*3.1,10.9,z);
   lightPool(x+dir*3.1,z,11,0);
 }
-function addStreetProps(cx,cz){
-  const R=FURN_LINE;
+function addStreetProps(cx,cz,hx,hz){
   for(let side=0;side<4;side++){
-    const n=2+Math.floor(Math.random()*3);
+    const half=(side<2?hx:hz), other=(side<2?hz:hx);
+    const R=other+FURN_OUT;
+    const n=2+Math.floor(Math.random()*(half>45?4:3));
     for(let i=0;i<n;i++){
-      const t=(i+.5)/n*(BLOCK-10)-(BLOCK-10)/2+rnd(-2.5,2.5);
+      const span=half*2-10;
+      const t=(i+.5)/n*span-span/2+rnd(-2.5,2.5);
       let x,z,ry;
       if(side===0){x=cx+t; z=cz-R; ry=0;}
       else if(side===1){x=cx+t; z=cz+R; ry=Math.PI;}
@@ -1306,18 +1301,18 @@ function addStreetProps(cx,cz){
   }
 }
 // Paved sidewalk + curb ring for a block
-function addPavement(cx,cz){
-  const s=BLOCK+13;
-  const g=new THREE.PlaneGeometry(s,s); g.rotateX(-Math.PI/2);
-  const uv=g.attributes.uv, k=s/PAVE_TILE;
-  for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*k,uv.getY(i)*k);
+function addPavement(cx,cz,hx,hz){
+  const sw=hx*2+PAVE_OUT*2, sd=hz*2+PAVE_OUT*2;
+  const g=new THREE.PlaneGeometry(sw,sd); g.rotateX(-Math.PI/2);
+  const uv=g.attributes.uv;
+  for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*sw/PAVE_TILE,uv.getY(i)*sd/PAVE_TILE);
   g.setAttribute('uv1',uv.clone());     // aoMap samples uv1, not uv
   place('PV',PAVE_MAT,g,cx,.09,cz);
   const h=.42;
-  addBox('CB',CURB_MAT,s+1,h,1,cx,h/2,cz-s/2);
-  addBox('CB',CURB_MAT,s+1,h,1,cx,h/2,cz+s/2);
-  addBox('CB',CURB_MAT,1,h,s+1,cx-s/2,h/2,cz);
-  addBox('CB',CURB_MAT,1,h,s+1,cx+s/2,h/2,cz);
+  addBox('CB',CURB_MAT,sw+1,h,1,cx,h/2,cz-sd/2);
+  addBox('CB',CURB_MAT,sw+1,h,1,cx,h/2,cz+sd/2);
+  addBox('CB',CURB_MAT,1,h,sd+1,cx-sw/2,h/2,cz);
+  addBox('CB',CURB_MAT,1,h,sd+1,cx+sw/2,h/2,cz);
 }
 
 // ─── JAPANESE SIGNAGE ────────────────────────────────────────────────────────
@@ -1493,14 +1488,15 @@ function shopUnit(bx,bz,ry,w,depth){
 }
 
 // Line the road-facing edges of a block with shops
-function shopRow(cx,cz){
+function shopRow(cx,cz,hx,hz){
   const depth=SHOP_DEPTH;
-  const inset=SHOP_MID;
   const sides=[[0,1],[Math.PI,-1],[Math.PI/2,0],[-Math.PI/2,0]];
   // two of the four edges, so blocks stay varied and geometry stays bounded
   const chosen=[0,1,2,3].sort(()=>Math.random()-.5).slice(0,2);
   chosen.forEach(si=>{
-    const span=BLOCK-8;
+    const half=(si<2?hx:hz), other=(si<2?hz:hx);
+    const inset=other+SHOP_OUT-depth/2;
+    const span=half*2-8;
     let t=-span/2;
     while(t<span/2-5){
       const w=rnd(4.5,8);
@@ -1518,7 +1514,7 @@ function shopRow(cx,cz){
     if(Math.random()<.5){
       const c=rnd(-.35,.35)*span;
       let x,z,ry;
-      const out=FURN_LINE;
+      const out=other+FURN_OUT;
       if(si===0){x=cx+c; z=cz-out; ry=Math.PI;}
       else if(si===1){x=cx+c; z=cz+out; ry=0;}
       else if(si===2){x=cx-out; z=cz+c; ry=Math.PI/2;}
@@ -1528,6 +1524,156 @@ function shopRow(cx,cz){
   });
 }
 
+
+// ─── CITY PLAN ───────────────────────────────────────────────────────────────
+// The layout used to be a perfect lattice: every road straight, every block the
+// same size. This builds an explicit plan first and everything else reads from
+// it. Roads are irregularly spaced, carry a type, and may jog sideways as they
+// cross a cross-street, so they zigzag rather than running dead straight from
+// one edge of the map to the other. Blocks stay rectangular — rotating them
+// would break shop placement, pedestrian loops and the AABB collision all at
+// once — but no two are the same size, and some are given over to a plaza, a
+// park or a landmark.
+const R_MAJOR=0, R_MINOR=1, R_PED=2;
+const ROAD_W=[16,11.5,9];                  // drivable/paved width by type
+const PAVE_OUT=6.5;                        // kerb to nominal block edge
+const SHOP_OUT=0.8, WALK_A=1.2, WALK_B=4.1, FURN_OUT=5.2, BUILD_IN=7.5;
+
+const PLAN={xs:[],zs:[],blocks:[],carPaths:[],pedWays:[]};
+
+function buildPlan(){
+  // 1. irregular road spacing, and a type per road
+  const mkLines=()=>{
+    const L=[];
+    let p=-HALF+rnd(20,50);
+    while(p<HALF-70){
+      const r=Math.random();
+      const type=r<.22?R_PED:(r<.52?R_MINOR:R_MAJOR);
+      L.push({base:p,type,w:ROAD_W[type],
+              oneway:type===R_MINOR?(Math.random()<.5?1:-1):0,
+              off:[]});
+      p+=rnd(96,168);
+    }
+    return L;
+  };
+  PLAN.xs=mkLines(); PLAN.zs=mkLines();
+
+  // 2. jogs: a road's position shifts as it crosses each cross-street, so it
+  //    steps through the city instead of running straight
+  const nz=PLAN.zs.length, nx=PLAN.xs.length;
+  PLAN.xs.forEach(r=>{
+    let cur=r.base;
+    for(let j=0;j<=nz;j++){
+      if(j>0&&Math.random()<.30)cur+=rnd(-26,26);
+      r.off[j]=cur;
+    }
+  });
+  PLAN.zs.forEach(r=>{
+    let cur=r.base;
+    for(let i=0;i<=nx;i++){
+      if(i>0&&Math.random()<.30)cur+=rnd(-26,26);
+      r.off[i]=cur;
+    }
+  });
+
+  // 3. blocks are what is left between the roads
+  for(let i=0;i<nx-1;i++)for(let j=0;j<nz-1;j++){
+    const a=PLAN.xs[i],b=PLAN.xs[i+1],c=PLAN.zs[j],d=PLAN.zs[j+1];
+    // off[k] is a road's position in the band between cross-streets k-1 and k.
+    // This block lies in band j+1 across, and band i+1 along — reading off[j]
+    // and off[i] here put blocks against where a jogged road used to be, which
+    // dropped buildings into the carriageway.
+    const x0=a.off[j+1]+a.w/2+PAVE_OUT, x1=b.off[j+1]-b.w/2-PAVE_OUT;
+    const z0=c.off[i+1]+c.w/2+PAVE_OUT, z1=d.off[i+1]-d.w/2-PAVE_OUT;
+    const hx=(x1-x0)/2, hz=(z1-z0)/2;
+    if(hx<24||hz<24)continue;                    // too thin to be a block
+    PLAN.blocks.push({cx:(x0+x1)/2,cz:(z0+z1)/2,hx,hz,i,j,kind:'city',
+      pedSides:{x0:a.type===R_PED,x1:b.type===R_PED,z0:c.type===R_PED,z1:d.type===R_PED}});
+  }
+
+  // 4. reserve the special blocks. The landmark wants to be central and large,
+  //    so it can be seen from most of the city.
+  const byCentral=[...PLAN.blocks].sort((p,q)=>
+    (Math.hypot(p.cx,p.cz)-Math.min(p.hx,p.hz)*2)-(Math.hypot(q.cx,q.cz)-Math.min(q.hx,q.hz)*2));
+  if(byCentral[0])byCentral[0].kind='landmark';
+  const big=[...PLAN.blocks].filter(b=>b.kind==='city')
+    .sort((p,q)=>(q.hx*q.hz)-(p.hx*p.hz));
+  if(big[0])big[0].kind='plaza';                 // the round block
+  if(big[1])big[1].kind='museum';
+  if(big[2])big[2].kind='park';
+  if(big[3])big[3].kind='park';
+
+  // 5. drivable polylines for the traffic, skipping the pedestrian streets
+  PLAN.xs.forEach((r,i)=>{
+    if(r.type===R_PED){PLAN.pedWays.push({axis:'x',r,i});return;}
+    const pts=[];
+    for(let j=0;j<=nz;j++){
+      const z0=j===0?-HALF:PLAN.zs[j-1].off[i]??-HALF;
+      const z1=j>=nz?HALF:PLAN.zs[j].off[i]??HALF;
+      pts.push([r.off[j],z0],[r.off[j],z1]);
+    }
+    PLAN.carPaths.push({pts,oneway:r.oneway,w:r.w});
+  });
+  PLAN.zs.forEach((r,j)=>{
+    if(r.type===R_PED){PLAN.pedWays.push({axis:'z',r,j});return;}
+    const pts=[];
+    for(let i=0;i<=nx;i++){
+      const x0=i===0?-HALF:PLAN.xs[i-1].off[j]??-HALF;
+      const x1=i>=nx?HALF:PLAN.xs[i].off[j]??HALF;
+      pts.push([x0,r.off[i]],[x1,r.off[i]]);
+    }
+    PLAN.carPaths.push({pts,oneway:r.oneway,w:r.w});
+  });
+}
+
+// ─── ROAD SURFACES ───────────────────────────────────────────────────────────
+// The ground plane is already tarmac, so roads need no surface of their own —
+// only a centre line where traffic runs both ways, and paving where a street is
+// closed to cars.
+function layRoads(){
+  const nz=PLAN.zs.length,nx=PLAN.xs.length;
+  const paved=(x,z,w,d)=>{
+    const g=new THREE.PlaneGeometry(w,d); g.rotateX(-Math.PI/2);
+    const uv=g.attributes.uv;
+    for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*w/PAVE_TILE,uv.getY(i)*d/PAVE_TILE);
+    g.setAttribute('uv1',uv.clone());
+    place('PV',PAVE_MAT,g,x,.10,z);
+  };
+  PLAN.xs.forEach((r,i)=>{
+    const ped=r.type===R_PED;
+    for(let j=0;j<=nz;j++){
+      const z0=j===0?-HALF:(PLAN.zs[j-1].off[i]??-HALF);
+      const z1=j>=nz?HALF:(PLAN.zs[j].off[i]??HALF);
+      if(z1<=z0+1)continue;
+      if(ped)paved(r.off[j],(z0+z1)/2,r.w,z1-z0);
+      else if(!r.oneway)
+        addBox('LN',LINE_MAT,.55,.02,(z1-z0)*.88,r.off[j],.08,(z0+z1)/2);
+    }
+  });
+  PLAN.zs.forEach((r,j)=>{
+    const ped=r.type===R_PED;
+    for(let i=0;i<=nx;i++){
+      const x0=i===0?-HALF:(PLAN.xs[i-1].off[j]??-HALF);
+      const x1=i>=nx?HALF:(PLAN.xs[i].off[j]??HALF);
+      if(x1<=x0+1)continue;
+      if(ped)paved((x0+x1)/2,r.off[i],x1-x0,r.w);
+      else if(!r.oneway)
+        addBox('LN',LINE_MAT,(x1-x0)*.88,.02,.55,(x0+x1)/2,.08,r.off[i]);
+    }
+  });
+  // pedestrian streets get lanterns and seating down the middle
+  PLAN.pedWays.forEach(pw=>{
+    const r=pw.r, along=pw.axis==='x';
+    for(let t=-HALF+30;t<HALF-30;t+=rnd(20,34)){
+      const idx=Math.max(0,Math.min(r.off.length-1,Math.round((t+HALF)/CELL)));
+      const x=along?r.off[idx]:t, z=along?t:r.off[idx];
+      place('LAMP',LAMP_MAT,new THREE.SphereGeometry(.3,6,5),x,3.6,z);
+      lightPool(x,z,5,0);
+      if(Math.random()<.5)bench(x+rnd(-2,2),z+rnd(-2,2),Math.random()*Math.PI);
+      if(Math.random()<.35)planter(x+rnd(-3,3),z+rnd(-3,3),Math.random()*Math.PI);
+    }
+  });
+}
 
 // ─── COLLISION ───────────────────────────────────────────────────────────────
 // Solids are registered as axis-aligned boxes at generation time and bucketed
@@ -1580,15 +1726,7 @@ function moveSolid(px,pz,nx,nz,r){
 // walking lane is reserved: nothing is ever placed inside it. Street furniture
 // goes in its own strip against the kerb, and the roadway is sized so a car at
 // full lane offset still clears the pavement.
-const PAVE_HALF = (BLOCK+13)/2;          // 46.5  kerb line
-const SHOP_FRONT= 40.8;                  //       the street wall
 const SHOP_DEPTH= 5.5;
-const SHOP_MID  = SHOP_FRONT-SHOP_DEPTH/2;
-const FURN_LINE = PAVE_HALF-1.3;         // 45.2  trees, bins, lamps, vending
-const WALK_IN   = SHOP_FRONT+0.4;        // 41.2  clear lane, inner edge
-const WALK_OUT  = FURN_LINE-1.1;         // 44.1  clear lane, outer edge
-const ROAD_HALF = (CELL-2*PAVE_HALF)/2;  //  7.5  drivable half-width
-const LANE_MAX  = ROAD_HALF-1.65-0.45;   //       car half-width plus a margin
 
 // ─── LOT SUBDIVISION ─────────────────────────────────────────────────────────
 // Three fixed layouts repeated across a hundred identical blocks is what read as
@@ -1672,49 +1810,134 @@ function vacantLot(l){
         l.x+l.w/2-1.6,3.5,l.z-l.d/2+1.6);
 }
 
-// ─── BLOCKS ──────────────────────────────────────────────────────────────────
-function generateBlock(gx,gz){
-  const cx=-HALF+gx*CELL+ROAD+BLOCK/2;
-  const cz=-HALF+gz*CELL+ROAD+BLOCK/2;
-  addPavement(cx,cz);
-  shopRow(cx,cz);
+// ─── SPECIAL BLOCKS ──────────────────────────────────────────────────────────
+// A circular plaza: a ring of shops facing inward around an open circle with a
+// monument at the centre. The one genuinely round block in the city.
+function plazaBlock(b){
+  const r=Math.min(b.hx,b.hz)-9;
+  const g=new THREE.CircleGeometry(r,40); g.rotateX(-Math.PI/2);
+  const uv=g.attributes.uv;
+  for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*r*2/PAVE_TILE,uv.getY(i)*r*2/PAVE_TILE);
+  g.setAttribute('uv1',uv.clone());
+  place('PV',PAVE_MAT,g,b.cx,.13,b.cz);
 
-  if(Math.random()<.07){
-    // Park / plaza
-    const pm=new THREE.Mesh(new THREE.PlaneGeometry(BLOCK-6,BLOCK-6),
-      new THREE.MeshStandardMaterial({color:0x121c14,roughness:.95}));
-    pm.rotation.x=-Math.PI/2; pm.position.set(cx,.14,cz); scene.add(pm);
-    for(let i=0;i<9;i++)tree(cx+rnd(-1,1)*BLOCK*.36,cz+rnd(-1,1)*BLOCK*.36);
-    for(let i=0;i<3;i++)bench(cx+rnd(-1,1)*BLOCK*.3,cz+rnd(-1,1)*BLOCK*.3,Math.random()*Math.PI);
-    bin(cx+rnd(-8,8),cz+rnd(-8,8));
-    place('Gr',GREEBLE_MAT,new THREE.CylinderGeometry(1.2,2,14,8),cx,7,cz);
-    lightPool(cx,cz,16,3);
-    addStreetProps(cx,cz);
-    return;
+  const n=Math.max(10,Math.round(2*Math.PI*r/13));
+  for(let k=0;k<n;k++){
+    const a=k/n*Math.PI*2;
+    const rr=r+4.2;
+    // each unit faces the centre of the circle
+    shopUnit(b.cx+Math.cos(a)*rr,b.cz+Math.sin(a)*rr,-a+Math.PI/2,rnd(8,11),5.5);
+    addSolid(b.cx+Math.cos(a)*rr,b.cz+Math.sin(a)*rr,7,7);
   }
+  // monument
+  const mh=rnd(16,26);
+  place('C1',CONC_MATS[1],new THREE.CylinderGeometry(2.6,4.2,3,12),b.cx,1.5,b.cz);
+  place('C0',CONC_MATS[0],new THREE.CylinderGeometry(.8,1.9,mh,10),b.cx,3+mh/2,b.cz);
+  place('S0',STRIP_MATS[0],new THREE.SphereGeometry(1.5,10,8),b.cx,3+mh+1.2,b.cz);
+  addSolid(b.cx,b.cz,8,8);
+  lightPool(b.cx,b.cz,r*.8,0);
+  for(let k=0;k<8;k++){
+    const a=Math.random()*Math.PI*2, d=rnd(r*.35,r*.85);
+    if(Math.random()<.5)tree(b.cx+Math.cos(a)*d,b.cz+Math.sin(a)*d);
+    else bench(b.cx+Math.cos(a)*d,b.cz+Math.sin(a)*d,-a);
+  }
+}
+
+// The overlord tower: deliberately the tallest thing in the city, on its own
+// plinth, so it reads as a landmark from anywhere on the map.
+function landmarkBlock(b){
+  const pw=b.hx*1.5,pd=b.hz*1.5;
+  addBox('C3',CONC_MATS[3],pw,5,pd,b.cx,2.5,b.cz);
+  addSolid(b.cx,b.cz,pw,pd);
+  for(let s=0;s<4;s++){                          // approach steps
+    const t=(s+1)*1.6;
+    addBox('C2',CONC_MATS[2],pw-t*2,1.2,pd-t*2,b.cx,5+s*1.2,b.cz);
+  }
+  const w=Math.min(b.hx,b.hz)*.85;
+  const H=430;
+  addBuilding(b.cx,b.cz,w,w,H,'taper');
+  addSolid(b.cx,b.cz,w,w);
+  // beacon mast and a ring of red lamps
+  place('Gr',GREEBLE_MAT,new THREE.CylinderGeometry(.5,1.6,60,8),b.cx,H+30,b.cz);
+  for(let k=0;k<4;k++){
+    const a=k/4*Math.PI*2;
+    const bm=new THREE.Mesh(BLINK_GEO,new THREE.MeshBasicMaterial({color:0xff2200}));
+    bm.position.set(b.cx+Math.cos(a)*w*.42,H*.72,b.cz+Math.sin(a)*w*.42);
+    bm.userData={phase:k*.7,rate:.5};
+    scene.add(bm); blinkLights.push(bm);
+  }
+  lightPool(b.cx,b.cz,Math.min(pw,pd)*.45,2);
+}
+
+// A museum: low, wide, colonnaded, with a dome — a deliberate change of rhythm
+// after a hundred towers.
+function museumBlock(b){
+  const w=b.hx*1.5,d=b.hz*1.5,h=22;
+  addBox('C0',CONC_MATS[0],w,3,d,b.cx,1.5,b.cz);
+  addBox('C1',CONC_MATS[1],w*.86,h,d*.86,b.cx,3+h/2,b.cz);
+  addSolid(b.cx,b.cz,w*.9,d*.9);
+  const n=Math.max(6,Math.round(w/9));
+  for(let k=0;k<n;k++){                          // colonnade along the front
+    const x=b.cx-w*.43+(k+.5)*(w*.86/n);
+    place('C0',CONC_MATS[0],new THREE.CylinderGeometry(1.1,1.1,h*.8,10),x,3+h*.4,b.cz+d*.44);
+  }
+  addBox('C0',CONC_MATS[0],w*.9,2.2,d*.06,b.cx,3+h*.82,b.cz+d*.45);
+  place('C1',CONC_MATS[1],
+        new THREE.SphereGeometry(Math.min(w,d)*.22,18,12,0,Math.PI*2,0,Math.PI/2),
+        b.cx,3+h,b.cz);
+  const si=Math.random()*BANNER_MATS.length|0;
+  place('BAN'+si,BANNER_MATS[si],new THREE.PlaneGeometry(3.2,10),
+        b.cx-w*.3,3+h*.5,b.cz+d*.47);
+  lightPool(b.cx,b.cz+d*.5,Math.min(w,d)*.4,1);
+}
+
+function parkBlock(b){
+  const pm=new THREE.Mesh(new THREE.PlaneGeometry(b.hx*1.85,b.hz*1.85),
+    new THREE.MeshStandardMaterial({color:0x121c14,roughness:.95}));
+  pm.rotation.x=-Math.PI/2; pm.position.set(b.cx,.14,b.cz); scene.add(pm);
+  const n=Math.round(b.hx*b.hz/240);
+  for(let i=0;i<n;i++)tree(b.cx+rnd(-.85,.85)*b.hx,b.cz+rnd(-.85,.85)*b.hz);
+  for(let i=0;i<4;i++)bench(b.cx+rnd(-.7,.7)*b.hx,b.cz+rnd(-.7,.7)*b.hz,Math.random()*Math.PI);
+  bin(b.cx+rnd(-8,8),b.cz+rnd(-8,8));
+  // a lantern-lit path across it
+  for(let i=0;i<5;i++){
+    const t=(i+.5)/5;
+    const x=b.cx-b.hx*.8+t*b.hx*1.6, z=b.cz+Math.sin(t*Math.PI*1.6)*b.hz*.4;
+    place('LAMP',LAMP_MAT,new THREE.SphereGeometry(.26,6,5),x,3.2,z);
+    lightPool(x,z,4.2,0);
+  }
+}
+
+// ─── BLOCKS ──────────────────────────────────────────────────────────────────
+function generateBlock(b){
+  const {cx,cz,hx,hz}=b;
+  addPavement(cx,cz,hx,hz);
+
+  if(b.kind==='plaza'){ plazaBlock(b); addStreetProps(cx,cz,hx,hz); return; }
+  if(b.kind==='landmark'){ landmarkBlock(b); addStreetProps(cx,cz,hx,hz); return; }
+  if(b.kind==='museum'){ museumBlock(b); addStreetProps(cx,cz,hx,hz); return; }
+  if(b.kind==='park'){ parkBlock(b); addStreetProps(cx,cz,hx,hz); return; }
+
+  shopRow(cx,cz,hx,hz);
 
   // Downtown grows tall, the outskirts stay low
   const dc=Math.min(1,Math.hypot(cx,cz)/HALF);
   const scale=1.45-dc*1.0;
 
-  // Buildable area stops short of the kerb so the shopfront strip has room
-  const BUILD=BLOCK-15;
+  const BW=(hx-BUILD_IN)*2, BD=(hz-BUILD_IN)*2;
   const lots=[],alleys=[];
-  splitLots(cx,cz,BUILD,BUILD,2+Math.floor(Math.random()*3),lots,alleys);
+  splitLots(cx,cz,BW,BD,2+Math.floor(Math.random()*3),lots,alleys);
   alleys.forEach(dressAlley);
   const made=[];
 
   lots.forEach(l=>{
     if(l.w<MIN_LOT*1.15&&l.d<MIN_LOT*1.15&&Math.random()<.22){ vacantLot(l); return; }
-    // buildings sit off their lot lines by a little, so the street wall is ragged
     const bw=Math.max(8,l.w-rnd(1.2,4.5));
     const bd=Math.max(8,l.d-rnd(1.2,4.5));
     const ox=rnd(-1,1)*Math.max(0,(l.w-bw)/2), oz=rnd(-1,1)*Math.max(0,(l.d-bd)/2);
-    // smaller plots carry lower buildings — that correlation is what makes a
-    // subdivided block read as a neighbourhood rather than noise
-    const lotFrac=Math.min(1,(l.w*l.d)/(BUILD*BUILD*.55));
+    const lotFrac=Math.min(1,(l.w*l.d)/(BW*BD*.55));
     let bh=(9+Math.pow(Math.random(),1.7)*200*(.35+.65*lotFrac))*scale;
-    if(Math.random()<.04)bh*=1.9;                 // occasional landmark spike
+    if(Math.random()<.04)bh*=1.9;
     bh=Math.max(9,bh);
     let style;
     if(bh<40)      style=pick(['stack','ring','podium','setback']);
@@ -1728,30 +1951,24 @@ function generateBlock(gx,gz){
 
   // Skybridge between two towers in the same block
   if(made.length>1&&Math.random()<.55){
-    const a=made[0],b=made[1];
-    const y=Math.min(a.h,b.h)*rnd(.4,.8);
+    const a=made[0],b2=made[1];
+    const y=Math.min(a.h,b2.h)*rnd(.4,.8);
     if(y>14){
-      const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz),ang=Math.atan2(dx,dz);
+      const dx=b2.x-a.x,dz=b2.z-a.z,len=Math.hypot(dx,dz),ang=Math.atan2(dx,dz);
       const ci=Math.floor(Math.random()*CONC_MATS.length);
-      addBox('C'+ci,CONC_MATS[ci],3.6,3.4,len,(a.x+b.x)/2,y,(a.z+b.z)/2,ang);
+      addBox('C'+ci,CONC_MATS[ci],3.6,3.4,len,(a.x+b2.x)/2,y,(a.z+b2.z)/2,ang);
       const si=Math.floor(Math.random()*STRIP_MATS.length);
-      addBox('S'+si,STRIP_MATS[si],.8,.3,len*.98,(a.x+b.x)/2,y+1.8,(a.z+b.z)/2,ang);
+      addBox('S'+si,STRIP_MATS[si],.8,.3,len*.98,(a.x+b2.x)/2,y+1.8,(a.z+b2.z)/2,ang);
     }
   }
 
-  addStreetProps(cx,cz);
-  if(gx<GRID&&gz<GRID){
-    // on the kerb, arm reaching out over the road — they used to be planted
-    // dead centre in the carriageway
-    streetLamp(cx-FURN_LINE,cz+rnd(-.3,.3)*BLOCK,-1);
-    streetLamp(cx+FURN_LINE,cz+rnd(-.3,.3)*BLOCK,1);
-    if(Math.random()<.6)streetLamp(cx+rnd(-.3,.3)*BLOCK,cz-FURN_LINE,-1);
-  }
+  addStreetProps(cx,cz,hx,hz);
+  // lamps on the kerb, arm out over the road
+  streetLamp(cx-hx-FURN_OUT,cz+rnd(-.4,.4)*hz,-1);
+  streetLamp(cx+hx+FURN_OUT,cz+rnd(-.4,.4)*hz,1);
+  if(Math.random()<.6)streetLamp(cx+rnd(-.4,.4)*hx,cz-hz-FURN_OUT,-1);
 }
 
-// ─── OUTER CITY ──────────────────────────────────────────────────────────────
-// Simplified blocks filling the ring between the playable grid and the painted
-// skyline, so the city fades into the haze instead of stopping at a hard edge.
 function addOuterCity(){
   const inner=HALF+ROAD, outer=900;
   for(let i=0;i<340;i++){
@@ -1783,9 +2000,12 @@ const pods=[];
 function addSkyways(){
   const lines=[];
   for(let i=0;i<3;i++){
+    // follow an actual road from the plan rather than an assumed grid line
     const horiz=i%2===0;
-    const ri=1+Math.floor(Math.random()*(GRID-1));
-    const p=-HALF+ri*CELL+ROAD/2;
+    const src=horiz?PLAN.zs:PLAN.xs;
+    const pick2=src.filter(r=>r.type!==R_PED);
+    if(!pick2.length)continue;
+    const p=pick2[Math.floor(Math.random()*pick2.length)].base;
     const y=38+Math.random()*26;
     lines.push({horiz,p,y});
 
@@ -1797,8 +2017,8 @@ function addSkyways(){
       if(horiz)addBox('S'+si,STRIP_MATS[si],CITY,.18,.25,0,y+1.2,p+o);
       else     addBox('S'+si,STRIP_MATS[si],.25,.18,CITY,p+o,y+1.2,0);
     });
-    for(let k=0;k<GRID;k++){                     // pylons
-      const s=-HALF+k*CELL+CELL/2;
+    for(let k=0;k<9;k++){                        // pylons
+      const s=-HALF+(k+.5)*CITY/9;
       const px=horiz?s:p, pz=horiz?p:s;
       place('Gr',GREEBLE_MAT,new THREE.CylinderGeometry(1.6,2.6,y,8),px,y/2,pz);
       addBox('C'+ci,CONC_MATS[ci],horiz?5:13,1.8,horiz?13:5,px,y-1.6,pz);
@@ -1906,8 +2126,20 @@ function buildCar(type,paint){
   return {body:mergeGeometries(body,false),lights:mergeGeometries(lights,false)};
 }
 
+// Cars follow the plan's polylines, so they take the jogs with the road and
+// never appear on a pedestrian street. One-way roads carry traffic in a single
+// direction; two-way roads put each direction on its own side of the centre line.
+function placeCarOnPath(g,fresh){
+  const path=pick(PLAN.carPaths);
+  const dir=path.oneway?(path.oneway>0?1:-1):(Math.random()<.5?1:-1);
+  const lane=(path.oneway? rnd(-1,1)*(path.w/2-2.4)
+                         : dir*rnd(1.6,Math.max(1.7,path.w/2-2.0)));
+  g.userData={path,seg:fresh?Math.floor(Math.random()*(path.pts.length-1)):(dir>0?0:path.pts.length-2),
+              t:fresh?Math.random():(dir>0?0:1),
+              dir,lane,spd:15+Math.random()*24};
+}
 function spawnCars(){
-  for(let i=0;i<40;i++){
+  for(let i=0;i<44;i++){
     const taxi=Math.random()<.18;
     const type=taxi?3:(Math.random()<.28?1:(Math.random()<.22?2:0));
     const paint=taxi?0xf0c94a:pick(CAR_PAINT);
@@ -1915,24 +2147,32 @@ function spawnCars(){
     const g=new THREE.Group();
     g.add(new THREE.Mesh(parts.body,CAR_BODY_MAT));
     g.add(new THREE.Mesh(parts.lights,CAR_LIGHT_MAT));
-
-    g.position.y=0;
-    const horiz=Math.random()>.5;
-    const ri=Math.floor(Math.random()*GRID);
-    const rp=-HALF+ri*CELL+ROAD/2;          // road centreline, no jitter
-    const sp=(Math.random()-.5)*CITY;
-    const dir=Math.random()>.5?1:-1;
-    const lane=dir*(2.2+Math.random()*(LANE_MAX-2.2));
-    if(horiz){
-      g.position.set(sp,0,rp+lane);
-      g.rotation.y=dir>0?Math.PI/2:-Math.PI/2;
-      g.userData={axis:'x',spd:(15+Math.random()*25)*dir};
-    }else{
-      g.position.set(rp+lane,0,sp);
-      g.rotation.y=dir>0?0:Math.PI;
-      g.userData={axis:'z',spd:(15+Math.random()*25)*dir};
-    }
+    placeCarOnPath(g,true);
     scene.add(g); cars.push(g);
+  }
+}
+function driveCars(dt){
+  for(let n=0;n<cars.length;n++){
+    const c=cars[n],u=c.userData,P2=u.path.pts;
+    let a=P2[u.seg],b=P2[u.seg+1];
+    if(!a||!b){ placeCarOnPath(c,true); continue; }
+    let len=Math.hypot(b[0]-a[0],b[1]-a[1]);
+    if(len<0.001){ u.seg+=u.dir; if(u.seg<0||u.seg>=P2.length-1)placeCarOnPath(c,true); continue; }
+    u.t+=u.dir*u.spd*dt/len;
+    while(u.t>1){ u.seg++; if(u.seg>=P2.length-1){placeCarOnPath(c,true);break;} u.t-=1;
+      a=P2[u.seg];b=P2[u.seg+1];len=Math.max(.001,Math.hypot(b[0]-a[0],b[1]-a[1])); }
+    while(u.t<0){ u.seg--; if(u.seg<0){placeCarOnPath(c,true);break;} u.t+=1;
+      a=P2[u.seg];b=P2[u.seg+1];len=Math.max(.001,Math.hypot(b[0]-a[0],b[1]-a[1])); }
+    const aa=u.path.pts[u.seg],bb=u.path.pts[u.seg+1];
+    if(!aa||!bb)continue;
+    const dx=(bb[0]-aa[0]), dz=(bb[1]-aa[1]);
+    const L=Math.max(.001,Math.hypot(dx,dz));
+    const hx=dx/L, hz=dz/L;
+    // lane offset is perpendicular to travel
+    const px=aa[0]+dx*u.t - hz*u.lane;
+    const pz=aa[1]+dz*u.t + hx*u.lane;
+    c.position.set(px,0,pz);
+    c.rotation.y=Math.atan2(hx*u.dir,hz*u.dir);
   }
 }
 
@@ -2041,7 +2281,7 @@ function createRain(){
 // recycled around the player, so density stays high wherever you actually are
 // instead of being spread thin over a hundred blocks you cannot see.
 const PED_N=300;
-const PED_R=(WALK_IN+WALK_OUT)/2;  // down the middle of the reserved walking lane
+const PED_WALK=(WALK_A+WALK_B)/2;  // offset from a block edge: the reserved lane
 const peds=[];
 let pedTorso,pedHead,pedLegL,pedLegR,pedPhone;
 const _pd=new THREE.Object3D();
@@ -2052,12 +2292,17 @@ const COAT_COLS=[0x1b1d24,0x2a2f3a,0x3a2b2b,0x14181e,0x4a4038,0x232a33,
 const SKIN_COLS=[0xe8c9a8,0xd9b48c,0xc9975f,0xa87248,0x8a5a3a,0xf0d8bc];
 
 // Position and heading at distance t around a block's pavement loop
-function pedLoop(t,r){
-  const side=Math.floor(t/(2*r))%4, u=(t%(2*r))-r;
-  if(side===0)return [u,-r,Math.PI/2];      // heading: forward=(sin h,cos h)
-  if(side===1)return [r,u,0];
-  if(side===2)return [-u,r,-Math.PI/2];
-  return [-r,-u,Math.PI];
+// Walk the perimeter of a rectangular block at the reserved-lane offset
+function pedLoop(t,rx,rz){
+  const px=rx*2,pz=rz*2,per=2*(px+pz);
+  let u=((t%per)+per)%per;
+  if(u<px)          return [u-rx,-rz,Math.PI/2];   // heading: forward=(sin h,cos h)
+  u-=px;
+  if(u<pz)          return [rx,u-rz,0];
+  u-=pz;
+  if(u<px)          return [rx-u,rz,-Math.PI/2];
+  u-=px;
+  return [-rx,rz-u,Math.PI];
 }
 
 function buildPedestrians(){
@@ -2088,6 +2333,7 @@ function buildPedestrians(){
       t:0,dir:1,spd:rnd(1.0,1.9),
       phase:Math.random()*Math.PI*2,
       idle:Math.random()<.14,          // some just stand outside a shop
+      rx:40,rz:40,
       phone:Math.random()<.28,
       h:rnd(.92,1.06)                  // height scale
     });
@@ -2102,16 +2348,23 @@ function buildPedestrians(){
 // Drop a pedestrian onto a block near the player
 function respawnPed(i,anywhere){
   const p=peds[i];
-  const toCell=v=>Math.max(0,Math.min(GRID-1,Math.round((v+HALF-ROAD-BLOCK/2)/CELL)));
-  let gx,gz;
-  if(anywhere){ gx=Math.floor(Math.random()*GRID); gz=Math.floor(Math.random()*GRID); }
+  const B=PLAN.blocks;
+  if(!B.length)return;
+  let b;
+  if(anywhere)b=B[Math.floor(Math.random()*B.length)];
   else{
-    gx=Math.max(0,Math.min(GRID-1,toCell(P.pos.x)+Math.floor(rnd(-1.6,2.6))));
-    gz=Math.max(0,Math.min(GRID-1,toCell(P.pos.z)+Math.floor(rnd(-1.6,2.6))));
+    // pick a block near the player, so the crowd stays where it can be seen
+    let best=null,bd=1e9;
+    for(let k=0;k<24;k++){
+      const c=B[Math.floor(Math.random()*B.length)];
+      const d=Math.hypot(c.cx-P.pos.x,c.cz-P.pos.z);
+      if(d<bd&&d>18){bd=d;best=c;}
+    }
+    b=best||B[Math.floor(Math.random()*B.length)];
   }
-  p.cx=-HALF+gx*CELL+ROAD+BLOCK/2;
-  p.cz=-HALF+gz*CELL+ROAD+BLOCK/2;
-  p.t=Math.random()*8*PED_R;
+  p.cx=b.cx; p.cz=b.cz;
+  p.rx=b.hx+PED_WALK; p.rz=b.hz+PED_WALK;
+  p.t=Math.random()*2*(p.rx*2+p.rz*2);
   p.dir=Math.random()<.5?-1:1;
   p.idle=Math.random()<.14;
 }
@@ -2121,9 +2374,9 @@ function updatePedestrians(dt,time){
   for(let i=0;i<PED_N;i++){
     const p=peds[i];
     if(!p.idle) p.t+=p.spd*p.dir*dt;
-    const loop=8*PED_R;
+    const loop=2*(p.rx*2+p.rz*2);
     p.t=(p.t%loop+loop)%loop;
-    let [lx,lz,head]=pedLoop(p.t,PED_R);
+    let [lx,lz,head]=pedLoop(p.t,p.rx,p.rz);
     let x=p.cx+lx, z=p.cz+lz;
 
     // recycle anyone the player has left far behind, then place them the same
@@ -2131,7 +2384,7 @@ function updatePedestrians(dt,time){
     const dx=x-P.pos.x, dz=z-P.pos.z;
     if(dx*dx+dz*dz>235*235){
       respawnPed(i,false);
-      [lx,lz,head]=pedLoop(p.t,PED_R);
+      [lx,lz,head]=pedLoop(p.t,p.rx,p.rz);
       x=p.cx+lx; z=p.cz+lz;
     }
     const heading=head+(p.dir<0?Math.PI:0);
@@ -2180,8 +2433,7 @@ function updatePedestrians(dt,time){
 
 // ─── PLAYER ──────────────────────────────────────────────────────────────────
 const P={
-  // a road intersection: block centres sit at ROAD+BLOCK/2 within each cell
-  pos:new THREE.Vector3(-HALF+5*CELL+ROAD/2,2.5,-HALF+6*CELL+ROAD/2),
+  pos:new THREE.Vector3(0,2.5,0),   // moved onto a real road once the plan exists
   yaw:0, pitch:0,
   mode:'foot',
   spd:0
@@ -2265,12 +2517,32 @@ const mmx=mmc.getContext('2d');
 function drawMap(){
   const S=110;
   mmx.fillStyle='#03070f'; mmx.fillRect(0,0,S,S);
-  mmx.strokeStyle='#112233'; mmx.lineWidth=1;
-  for(let i=0;i<=GRID;i++){
-    const p=i/GRID*S;
-    mmx.beginPath(); mmx.moveTo(p,0); mmx.lineTo(p,S); mmx.stroke();
-    mmx.beginPath(); mmx.moveTo(0,p); mmx.lineTo(S,p); mmx.stroke();
-  }
+  // the real road network, jogs and all; pedestrian streets in a warmer tone
+  const M=v=>(v+HALF)/CITY*S;
+  PLAN.carPaths.forEach(pt=>{
+    mmx.strokeStyle=pt.oneway?'#1d3a4d':'#16283c';
+    mmx.lineWidth=pt.oneway?1:1.6;
+    mmx.beginPath();
+    pt.pts.forEach((q,k)=>k?mmx.lineTo(M(q[0]),M(q[1])):mmx.moveTo(M(q[0]),M(q[1])));
+    mmx.stroke();
+  });
+  mmx.strokeStyle='#4a3a1e'; mmx.lineWidth=1.2;
+  PLAN.pedWays.forEach(pw=>{
+    const r=pw.r;
+    mmx.beginPath();
+    r.off.forEach((v,k)=>{
+      const t=M(-HALF+k*CITY/Math.max(1,r.off.length-1)), o=M(v);
+      const x=pw.axis==='x'?o:t, z=pw.axis==='x'?t:o;
+      k?mmx.lineTo(x,z):mmx.moveTo(x,z);
+    });
+    mmx.stroke();
+  });
+  PLAN.blocks.forEach(b=>{
+    if(b.kind==='city')return;
+    mmx.fillStyle=b.kind==='landmark'?'#8a2f4a':b.kind==='park'?'#1e3a24':
+                  b.kind==='plaza'?'#2f3a5a':'#4a3f2a';
+    mmx.fillRect(M(b.cx-b.hx),M(b.cz-b.hz),b.hx*2/CITY*S,b.hz*2/CITY*S);
+  });
   // Cars
   mmx.fillStyle='#334466';
   cars.forEach(c=>{
@@ -2355,11 +2627,7 @@ function updatePlayer(dt){
 
 // ─── UPDATE NPCS ──────────────────────────────────────────────────────────────
 function updateNPCs(dt,t){
-  cars.forEach(c=>{
-    c.position[c.userData.axis]+=c.userData.spd*dt;
-    if(c.position[c.userData.axis]>HALF)c.position[c.userData.axis]=-HALF;
-    if(c.position[c.userData.axis]<-HALF)c.position[c.userData.axis]=HALF;
-  });
+  driveCars(dt);
 
   flyingCars.forEach(c=>{
     c.position[c.userData.axis]+=c.userData.spd*dt;
@@ -2461,12 +2729,25 @@ async function init(){
     setLoad(18,'CALIBRATING HORIZON...');    await tick(30);
     buildEnvMap();
     setLoad(24,'PREFILTERING REFLECTIONS...'); await tick(20);
+    buildPlan();
+    // stand the player on a road junction from the plan, never inside a block
+    (()=>{
+      const xr=PLAN.xs.find(r=>r.type!==R_PED)||PLAN.xs[0];
+      const zr=PLAN.zs.find(r=>r.type!==R_PED)||PLAN.zs[0];
+      if(xr&&zr){
+        const j=Math.min(xr.off.length-1,Math.floor(PLAN.zs.length/2));
+        const i=Math.min(zr.off.length-1,Math.floor(PLAN.xs.length/2));
+        P.pos.set(xr.off[j],P.pos.y,zr.off[i]);
+      }
+    })();
     buildSignPools();
     setLoad(30,'CONSTRUCTING CITY...');
-    for(let gx=0;gx<GRID;gx++){
-      for(let gz=0;gz<GRID;gz++) generateBlock(gx,gz);
+    for(let bi=0;bi<PLAN.blocks.length;bi++){
+      generateBlock(PLAN.blocks[bi]);
+      const gx=Math.floor(bi/Math.max(1,Math.round(Math.sqrt(PLAN.blocks.length))));
       if(gx%3===0){setLoad(30+gx*4,'CONSTRUCTING CITY...'); await tick(10);}
     }
+    layRoads();
     setLoad(62,'EXTENDING SPRAWL...');       await tick(20);
     addOuterCity();
     setLoad(66,'RAISING SKYWAYS...');        await tick(20);
