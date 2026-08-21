@@ -1275,13 +1275,14 @@ function adPylon(x,z,ry){
   lightPool(x,z,6,Math.floor(Math.random()*4));
 }
 function streetLamp(x,z,dir){
+  addSolid(x,z,.5,.5);
   place('Gr',GREEBLE_MAT,new THREE.CylinderGeometry(.14,.22,11,8),x,5.5,z);
   place('Gr',GREEBLE_MAT,new THREE.CylinderGeometry(.08,.08,3.5,6).rotateZ(Math.PI/2),x+dir*1.6,11,z);
   place('LAMP',LAMP_MAT,new THREE.SphereGeometry(.5,8,8),x+dir*3.1,10.9,z);
   lightPool(x+dir*3.1,z,11,0);
 }
 function addStreetProps(cx,cz){
-  const R=BLOCK/2+4.5;
+  const R=FURN_LINE;
   for(let side=0;side<4;side++){
     const n=2+Math.floor(Math.random()*3);
     for(let i=0;i<n;i++){
@@ -1394,6 +1395,7 @@ const AWNING=[0x9c2f28,0x1f5f4a,0x2c4b88,0xb5741e,0x6a2f6a,0xc9c4b8].map(
 const VEND_GLOW=[0xff3a3a,0x3aa0ff,0xffffff].map(c=>new THREE.MeshBasicMaterial({color:c}));
 
 function vendingMachine(x,z,ry){
+  addSolid(x,z,2.0,2.0);
   addBox('SHW0',SHOP_WALL[0],1.9,2.0,.9,x,1.0,z,ry);
   const vi=Math.random()*VEND_GLOW.length|0;
   place('VG'+vi,VEND_GLOW[vi],new THREE.BoxGeometry(1.5,1.3,.12),
@@ -1408,7 +1410,12 @@ function shopUnit(bx,bz,ry,w,depth){
   const storeys=Math.random()<.45?2:1;
   const h=storeys===2?rnd(6.4,8.0):rnd(3.8,4.8);
 
-  // shell
+  // shell — solid, and square to the world since ry is a right angle
+  {
+    const across=Math.abs(Math.cos(ry))>.5?w:depth;
+    const along =Math.abs(Math.cos(ry))>.5?depth:w;
+    addSolid(bx,bz,across,along);
+  }
   let p=S(0,h/2,0);
   addBox('SHW'+wi,SHOP_WALL[wi],w,h,depth,p[0],p[1],p[2],ry);
   // parapet
@@ -1487,8 +1494,8 @@ function shopUnit(bx,bz,ry,w,depth){
 
 // Line the road-facing edges of a block with shops
 function shopRow(cx,cz){
-  const depth=5.5;
-  const inset=BLOCK/2+2.5-depth/2;
+  const depth=SHOP_DEPTH;
+  const inset=SHOP_MID;
   const sides=[[0,1],[Math.PI,-1],[Math.PI/2,0],[-Math.PI/2,0]];
   // two of the four edges, so blocks stay varied and geometry stays bounded
   const chosen=[0,1,2,3].sort(()=>Math.random()-.5).slice(0,2);
@@ -1511,7 +1518,7 @@ function shopRow(cx,cz){
     if(Math.random()<.5){
       const c=rnd(-.35,.35)*span;
       let x,z,ry;
-      const out=BLOCK/2+3.2;
+      const out=FURN_LINE;
       if(si===0){x=cx+c; z=cz-out; ry=Math.PI;}
       else if(si===1){x=cx+c; z=cz+out; ry=0;}
       else if(si===2){x=cx-out; z=cz+c; ry=Math.PI/2;}
@@ -1520,6 +1527,68 @@ function shopRow(cx,cz){
     }
   });
 }
+
+
+// ─── COLLISION ───────────────────────────────────────────────────────────────
+// Solids are registered as axis-aligned boxes at generation time and bucketed
+// into a coarse spatial hash, so a move tests a handful of candidates rather
+// than a few thousand. Movement resolves one axis at a time, which makes the
+// player slide along a wall instead of sticking to it.
+const SOLID_CELL=24;
+const SOLIDS=new Map();
+function solidKey(ix,iz){return ix*8192+iz;}
+function addSolid(x,z,w,d){
+  const x0=x-w/2,x1=x+w/2,z0=z-d/2,z1=z+d/2;
+  const box={x0,x1,z0,z1};
+  const i0=Math.floor(x0/SOLID_CELL),i1=Math.floor(x1/SOLID_CELL);
+  const j0=Math.floor(z0/SOLID_CELL),j1=Math.floor(z1/SOLID_CELL);
+  for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){
+    const k=solidKey(i,j);
+    let a=SOLIDS.get(k);
+    if(!a){a=[];SOLIDS.set(k,a);}
+    a.push(box);
+  }
+}
+// Circle of radius r at (x,z) against any registered box
+function blocked(x,z,r){
+  const i0=Math.floor((x-r)/SOLID_CELL),i1=Math.floor((x+r)/SOLID_CELL);
+  const j0=Math.floor((z-r)/SOLID_CELL),j1=Math.floor((z+r)/SOLID_CELL);
+  for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){
+    const a=SOLIDS.get(solidKey(i,j));
+    if(!a)continue;
+    for(let n=0;n<a.length;n++){
+      const b=a[n];
+      if(x+r>b.x0&&x-r<b.x1&&z+r>b.z0&&z-r<b.z1)return true;
+    }
+  }
+  return false;
+}
+// Slide-along-walls move. If the start point is already inside something —
+// which can happen on a mode switch or a respawn — movement is left free so
+// the player can walk back out rather than being sealed in.
+function moveSolid(px,pz,nx,nz,r){
+  if(blocked(px,pz,r))return [nx,nz];
+  let ox=px,oz=pz;
+  if(!blocked(nx,oz,r))ox=nx;
+  if(!blocked(ox,nz,r))oz=nz;
+  return [ox,oz];
+}
+
+// ─── STREET CROSS-SECTION ────────────────────────────────────────────────────
+// Every distance below is measured out from a block's centre. Collision only
+// feels fair if the space it constrains was laid out for movement, so the
+// walking lane is reserved: nothing is ever placed inside it. Street furniture
+// goes in its own strip against the kerb, and the roadway is sized so a car at
+// full lane offset still clears the pavement.
+const PAVE_HALF = (BLOCK+13)/2;          // 46.5  kerb line
+const SHOP_FRONT= 40.8;                  //       the street wall
+const SHOP_DEPTH= 5.5;
+const SHOP_MID  = SHOP_FRONT-SHOP_DEPTH/2;
+const FURN_LINE = PAVE_HALF-1.3;         // 45.2  trees, bins, lamps, vending
+const WALK_IN   = SHOP_FRONT+0.4;        // 41.2  clear lane, inner edge
+const WALK_OUT  = FURN_LINE-1.1;         // 44.1  clear lane, outer edge
+const ROAD_HALF = (CELL-2*PAVE_HALF)/2;  //  7.5  drivable half-width
+const LANE_MAX  = ROAD_HALF-1.65-0.45;   //       car half-width plus a margin
 
 // ─── LOT SUBDIVISION ─────────────────────────────────────────────────────────
 // Three fixed layouts repeated across a hundred identical blocks is what read as
@@ -1590,6 +1659,7 @@ function dressAlley(al){
 
 // Vacant plot: hoarding, gravel, a parked van, vending machines
 function vacantLot(l){
+  addSolid(l.x,l.z,l.w-1,l.d-1);
   const g=new THREE.PlaneGeometry(l.w-1,l.d-1); g.rotateX(-Math.PI/2);
   place('PV',PAVE_MAT,g,l.x,.11,l.z);
   const hh=2.2;
@@ -1652,6 +1722,7 @@ function generateBlock(gx,gz){
     else           style=pick(['setback','taper','core','podium','stack']);
     if(Math.min(bw,bd)<26&&style==='ring')style='stack';
     if(Math.min(bw,bd)<20&&style==='core')style='stack';
+    addSolid(l.x+ox,l.z+oz,bw,bd);
     made.push(addBuilding(l.x+ox,l.z+oz,bw,bd,bh,style));
   });
 
@@ -1670,9 +1741,11 @@ function generateBlock(gx,gz){
 
   addStreetProps(cx,cz);
   if(gx<GRID&&gz<GRID){
-    streetLamp(cx-BLOCK/2-ROAD/2,cz-BLOCK/2-ROAD/2,1);
-    streetLamp(cx+BLOCK/2+ROAD/2,cz+BLOCK/2+ROAD/2,-1);
-    if(Math.random()<.6)streetLamp(cx-BLOCK/2-ROAD/2,cz+BLOCK/2+ROAD/2,1);
+    // on the kerb, arm reaching out over the road — they used to be planted
+    // dead centre in the carriageway
+    streetLamp(cx-FURN_LINE,cz+rnd(-.3,.3)*BLOCK,-1);
+    streetLamp(cx+FURN_LINE,cz+rnd(-.3,.3)*BLOCK,1);
+    if(Math.random()<.6)streetLamp(cx+rnd(-.3,.3)*BLOCK,cz-FURN_LINE,-1);
   }
 }
 
@@ -1846,10 +1919,10 @@ function spawnCars(){
     g.position.y=0;
     const horiz=Math.random()>.5;
     const ri=Math.floor(Math.random()*GRID);
-    const rp=-HALF+ri*CELL+ROAD/2+Math.random()*4-2;
+    const rp=-HALF+ri*CELL+ROAD/2;          // road centreline, no jitter
     const sp=(Math.random()-.5)*CITY;
     const dir=Math.random()>.5?1:-1;
-    const lane=dir*(4+Math.random()*4);
+    const lane=dir*(2.2+Math.random()*(LANE_MAX-2.2));
     if(horiz){
       g.position.set(sp,0,rp+lane);
       g.rotation.y=dir>0?Math.PI/2:-Math.PI/2;
@@ -1968,7 +2041,7 @@ function createRain(){
 // recycled around the player, so density stays high wherever you actually are
 // instead of being spread thin over a hundred blocks you cannot see.
 const PED_N=300;
-const PED_R=BLOCK/2+5.2;          // walking radius: on the pavement, inside the kerb
+const PED_R=(WALK_IN+WALK_OUT)/2;  // down the middle of the reserved walking lane
 const peds=[];
 let pedTorso,pedHead,pedLegL,pedLegR,pedPhone;
 const _pd=new THREE.Object3D();
@@ -2107,7 +2180,8 @@ function updatePedestrians(dt,time){
 
 // ─── PLAYER ──────────────────────────────────────────────────────────────────
 const P={
-  pos:new THREE.Vector3(CELL*1.5,2.5,CELL*1.5),
+  // a road intersection: block centres sit at ROAD+BLOCK/2 within each cell
+  pos:new THREE.Vector3(-HALF+5*CELL+ROAD/2,2.5,-HALF+6*CELL+ROAD/2),
   yaw:0, pitch:0,
   mode:'foot',
   spd:0
@@ -2252,11 +2326,13 @@ function updatePlayer(dt){
     P.pos.z+=wz*spd*dt;
     P.pos.y=Math.max(5,P.pos.y);
   } else {
-    // Ground
+    // Ground — solid. Fly mode deliberately keeps no-clip.
     const wx=fwd*(-sin)+str*cos;
     const wz=fwd*(-cos)+str*(-sin);
-    P.pos.x+=wx*spd*dt;
-    P.pos.z+=wz*spd*dt;
+    const r=P.mode==='car'?1.7:0.42;
+    const [mx,mz]=moveSolid(P.pos.x,P.pos.z,
+                            P.pos.x+wx*spd*dt,P.pos.z+wz*spd*dt,r);
+    P.pos.x=mx; P.pos.z=mz;
     P.pos.y=HEIGHTS[P.mode];
   }
 
