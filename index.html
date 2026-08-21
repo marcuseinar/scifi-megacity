@@ -942,7 +942,7 @@ const CURB_MAT=new THREE.MeshStandardMaterial({color:0x3c414c,roughness:.85,meta
 // Fake pools of light — additive discs on the pavement, no extra real lights.
 // Vertex colours rather than a texture so the falloff never mips into a hard quad.
 const POOL_MAT=new THREE.MeshBasicMaterial({vertexColors:true,transparent:true,
-  opacity:.6,blending:THREE.AdditiveBlending,depthWrite:false});
+  opacity:.42,blending:THREE.AdditiveBlending,depthWrite:false});
 const POOL_COLS=[0xffc078,0x2fd0ff,0xff3f9a,0x5cff9a,0xb07cff];
 function lightPool(x,z,r,ci){
   const g=new THREE.CircleGeometry(r,16); g.rotateX(-Math.PI/2);
@@ -1272,7 +1272,7 @@ function streetLamp(x,z,dir){
   place('Gr',GREEBLE_MAT,new THREE.CylinderGeometry(.14,.22,11,8),x,5.5,z);
   place('Gr',GREEBLE_MAT,new THREE.CylinderGeometry(.08,.08,3.5,6).rotateZ(Math.PI/2),x+dir*1.6,11,z);
   place('LAMP',LAMP_MAT,new THREE.SphereGeometry(.5,8,8),x+dir*3.1,10.9,z);
-  lightPool(x+dir*3.1,z,11,0);
+  lightPool(x+dir*3.1,z,6.5,0);
 }
 function addStreetProps(cx,cz,hx,hz){
   for(let side=0;side<4;side++){
@@ -1895,6 +1895,42 @@ function addCampaign(){
   return placed;
 }
 
+
+// Street lighting scaled to the block, not a fixed two or three per block. With
+// blocks now up to 136 m across, a fixed count left long stretches unlit — and
+// the special blocks were returning before the lamp calls entirely, so a park
+// or a museum frontage had no lighting at all.
+function perimeterLamps(cx,cz,hx,hz,spacing){
+  const S=spacing||32;
+  const side=(half,other,axis,sign)=>{
+    const n=Math.max(2,Math.round(half*2/S));
+    for(let i=0;i<n;i++){
+      const t=(i+.5)/n*half*2-half;
+      if(axis==='x')streetLamp(cx+t,cz+sign*(other+FURN_OUT),sign);
+      else          streetLamp(cx+sign*(other+FURN_OUT),cz+t,sign);
+    }
+  };
+  side(hx,hz,'x',-1); side(hx,hz,'x',1);
+  side(hz,hx,'z',-1); side(hz,hx,'z',1);
+}
+
+// A park needs a lit edge or it reads as a hole in the city at night
+function parkRail(cx,cz,hx,hz){
+  const si=Math.floor(Math.random()*STRIP_MATS.length);
+  const run=(half,other,axis,sign)=>{
+    const n=Math.max(3,Math.round(half*2/9));
+    for(let i=0;i<n;i++){
+      const t=(i+.5)/n*half*2-half;
+      const x=axis==='x'?cx+t:cx+sign*other, z=axis==='x'?cz+sign*other:cz+t;
+      addBox('CB',CURB_MAT,.22,1.5,.22,x,.75,z);
+    }
+    if(axis==='x')addBox('S'+si,STRIP_MATS[si],half*2,.14,.14,cx,1.45,cz+sign*other);
+    else          addBox('S'+si,STRIP_MATS[si],.14,.14,half*2,cx+sign*other,1.45,cz);
+  };
+  run(hx,hz,'x',-1); run(hx,hz,'x',1);
+  run(hz,hx,'z',-1); run(hz,hx,'z',1);
+}
+
 // ─── SPECIAL BLOCKS ──────────────────────────────────────────────────────────
 // A circular plaza: a ring of shops facing inward around an open circle with a
 // monument at the centre. The one genuinely round block in the city.
@@ -1925,6 +1961,18 @@ function plazaBlock(b){
     const a=Math.random()*Math.PI*2, d=rnd(r*.35,r*.85);
     if(Math.random()<.5)tree(b.cx+Math.cos(a)*d,b.cz+Math.sin(a)*d);
     else bench(b.cx+Math.cos(a)*d,b.cz+Math.sin(a)*d,-a);
+  }
+  // The circle is sized on the shorter side, so an oblong block leaves dead
+  // ground at the ends. Fill it with kiosks, planting and light.
+  for(let k=0;k<26;k++){
+    const x=b.cx+rnd(-1,1)*(b.hx-4), z=b.cz+rnd(-1,1)*(b.hz-4);
+    if(Math.hypot(x-b.cx,z-b.cz)<r+7)continue;      // inside the circle already
+    const q=Math.random();
+    if(q<.34){ kiosk(x,z,Math.random()*Math.PI*2); lightPool(x,z,6,1); }
+    else if(q<.62)tree(x,z);
+    else if(q<.78)planter(x,z,Math.random()*Math.PI*2);
+    else { place('LAMP',LAMP_MAT,new THREE.SphereGeometry(.3,6,5),x,3.6,z);
+           lightPool(x,z,5.5,0); }
   }
 }
 
@@ -1984,12 +2032,32 @@ function parkBlock(b){
   for(let i=0;i<n;i++)tree(b.cx+rnd(-.85,.85)*b.hx,b.cz+rnd(-.85,.85)*b.hz);
   for(let i=0;i<4;i++)bench(b.cx+rnd(-.7,.7)*b.hx,b.cz+rnd(-.7,.7)*b.hz,Math.random()*Math.PI);
   bin(b.cx+rnd(-8,8),b.cz+rnd(-8,8));
-  // a lantern-lit path across it
-  for(let i=0;i<5;i++){
-    const t=(i+.5)/5;
-    const x=b.cx-b.hx*.8+t*b.hx*1.6, z=b.cz+Math.sin(t*Math.PI*1.6)*b.hz*.4;
-    place('LAMP',LAMP_MAT,new THREE.SphereGeometry(.26,6,5),x,3.2,z);
-    lightPool(x,z,4.2,0);
+  // a lit pavilion so the middle of the park is not simply black
+  {
+    const pr=Math.min(b.hx,b.hz)*.22;
+    place('C1',CONC_MATS[1],new THREE.CylinderGeometry(pr,pr,.4,12),b.cx,.5,b.cz);
+    for(let k=0;k<6;k++){
+      const a=k/6*Math.PI*2;
+      place('C0',CONC_MATS[0],new THREE.CylinderGeometry(.28,.28,4.4,8),
+            b.cx+Math.cos(a)*pr*.85,2.6,b.cz+Math.sin(a)*pr*.85);
+    }
+    place('C0',CONC_MATS[0],new THREE.ConeGeometry(pr*1.15,1.8,12),b.cx,5.6,b.cz);
+    const si=Math.floor(Math.random()*STRIP_MATS.length);
+    addBox('S'+si,STRIP_MATS[si],pr*2,.16,.16,b.cx,4.7,b.cz);
+    place('LAMP',LAMP_MAT,new THREE.SphereGeometry(.34,7,6),b.cx,4.2,b.cz);
+    lightPool(b.cx,b.cz,pr*2.6,0);
+    addSolid(b.cx,b.cz,pr*1.4,pr*1.4);
+  }
+  // lantern-lit paths, counted from the park's size rather than fixed at five —
+  // a large park lit by five lamps is a black field
+  const np=Math.max(7,Math.round(b.hx*2/16));
+  for(let i=0;i<np;i++){
+    const t=(i+.5)/np;
+    const x=b.cx-b.hx*.85+t*b.hx*1.7;
+    [Math.sin(t*Math.PI*1.6)*b.hz*.45, -Math.sin(t*Math.PI*1.3)*b.hz*.5].forEach(dz=>{
+      place('LAMP',LAMP_MAT,new THREE.SphereGeometry(.26,6,5),x,3.2,b.cz+dz);
+      lightPool(x,b.cz+dz,5.2,0);
+    });
   }
 }
 
@@ -1998,10 +2066,21 @@ function generateBlock(b){
   const {cx,cz,hx,hz}=b;
   addPavement(cx,cz,hx,hz);
 
-  if(b.kind==='plaza'){ plazaBlock(b); addStreetProps(cx,cz,hx,hz); return; }
-  if(b.kind==='landmark'){ landmarkBlock(b); addStreetProps(cx,cz,hx,hz); return; }
-  if(b.kind==='museum'){ museumBlock(b); addStreetProps(cx,cz,hx,hz); return; }
-  if(b.kind==='park'){ parkBlock(b); addStreetProps(cx,cz,hx,hz); return; }
+  if(b.kind!=='city'){
+    // Special blocks used to return here, before both the shopfronts and the
+    // street lamps, leaving four dark frontages each. They get lit edges now,
+    // and everything except the park gets street retail as well.
+    if(b.kind==='plaza')        plazaBlock(b);
+    else if(b.kind==='landmark')landmarkBlock(b);
+    else if(b.kind==='museum')  museumBlock(b);
+    else                        parkBlock(b);
+    if(b.kind==='park')parkRail(cx,cz,hx,hz);
+    else               shopRow(cx,cz,hx,hz);
+    addStreetProps(cx,cz,hx,hz);
+    // a park frontage has no lit windows behind it, so it needs denser lamps
+    perimeterLamps(cx,cz,hx,hz,b.kind==='park'?18:26);
+    return;
+  }
 
   shopRow(cx,cz,hx,hz);
 
@@ -2048,10 +2127,7 @@ function generateBlock(b){
   }
 
   addStreetProps(cx,cz,hx,hz);
-  // lamps on the kerb, arm out over the road
-  streetLamp(cx-hx-FURN_OUT,cz+rnd(-.4,.4)*hz,-1);
-  streetLamp(cx+hx+FURN_OUT,cz+rnd(-.4,.4)*hz,1);
-  if(Math.random()<.6)streetLamp(cx+rnd(-.4,.4)*hx,cz-hz-FURN_OUT,-1);
+  perimeterLamps(cx,cz,hx,hz);
 }
 
 function addOuterCity(){
