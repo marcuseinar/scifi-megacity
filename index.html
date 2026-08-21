@@ -51,6 +51,28 @@ canvas#c{display:block;position:fixed;inset:0;width:100%!important;height:100%!i
 #vbts{position:fixed;bottom:90px;right:150px;display:flex;flex-direction:column;gap:8px;pointer-events:all;z-index:20}
 .vb{width:44px;height:44px;background:rgba(0,0,0,.7);border:1px solid rgba(255,100,0,.3);color:rgba(255,100,0,.7);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 
+
+/* Arcade */
+#arcade-prompt{position:fixed;left:50%;bottom:132px;transform:translateX(-50%);display:none;
+  z-index:22;pointer-events:all;background:rgba(0,0,0,.72);border:1px solid #00ffff;
+  color:#00ffff;font-family:'Courier New',monospace;font-size:12px;letter-spacing:3px;
+  padding:9px 20px;text-transform:uppercase;cursor:pointer;box-shadow:0 0 18px rgba(0,255,255,.3)}
+#arcade{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
+  background:rgba(2,4,10,.93);backdrop-filter:blur(3px)}
+/* header lives inside the panel: positioning it outside clipped it against the
+   top of the viewport on shorter screens */
+#arcade-inner{position:relative;display:flex;flex-direction:column;
+  width:min(94vw,520px);height:min(92vh,980px);
+  border:2px solid #00ffff;box-shadow:0 0 60px rgba(0,255,255,.35);background:#000}
+#arcade-bar{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
+  gap:10px;padding:7px 10px;background:rgba(0,255,255,.07);border-bottom:1px solid rgba(0,255,255,.35)}
+#arcade-frame{flex:1 1 auto;width:100%;border:0;display:block;min-height:0}
+#arcade-exit{background:rgba(0,0,0,.8);border:1px solid #ff6688;
+  color:#ff6688;font-family:'Courier New',monospace;font-size:11px;letter-spacing:3px;
+  padding:6px 12px;cursor:pointer;text-transform:uppercase;white-space:nowrap}
+#arcade-cap{color:#00ffff;font-family:'Courier New',monospace;
+  font-size:11px;letter-spacing:3px;opacity:.75;white-space:nowrap;overflow:hidden}
+
 /* Scan line overlay */
 #scan{position:fixed;inset:0;pointer-events:none;z-index:5;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px)}
 </style>
@@ -73,6 +95,18 @@ canvas#c{display:block;position:fixed;inset:0;width:100%!important;height:100%!i
   <div id="cross"></div>
   <div id="spd">0<small>KM/H</small></div>
   <div id="help-txt">WASD / JOYSTICK = MOVE &nbsp;|&nbsp; MOUSE / RIGHT-STICK = LOOK &nbsp;|&nbsp; 1=FOOT 2=CAR 3=FLY</div>
+</div>
+
+<div id="arcade-prompt">▶ PRESS E TO PLAY</div>
+<div id="arcade">
+  <div id="arcade-inner">
+    <div id="arcade-bar">
+      <div id="arcade-cap">PEGASUS — MOON LANDER</div>
+      <button id="arcade-exit">✕ STAND UP (ESC)</button>
+    </div>
+    <iframe id="arcade-frame" title="Pegasus" src="about:blank"
+            allow="autoplay; fullscreen; gamepad" referrerpolicy="no-referrer"></iframe>
+  </div>
 </div>
 
 <div id="map"><canvas id="map-c" width="110" height="110"></canvas></div>
@@ -1385,6 +1419,9 @@ const SHOP_WALL=[0xe8e4dc,0xd8d2c4,0xf0eee8,0xc9c4b8,0xe0d8cc].map(
 const SHOP_GLOW=[0xffdca8,0xfff0d0,0xffe8b0,0xd8f0ff].map(
   c=>new THREE.MeshBasicMaterial({color:c}));
 const SHUTTER_MAT=new THREE.MeshStandardMaterial({color:0x6a6f78,roughness:.7,metalness:.5});
+const CAB_MAT=new THREE.MeshStandardMaterial({color:0x1b1f2b,roughness:.5,metalness:.35});
+const CAB_TRIM=new THREE.MeshStandardMaterial({color:0x2b3346,roughness:.55,metalness:.4});
+const CAB_BTN=new THREE.MeshBasicMaterial({color:0xff3355});
 const AWNING=[0x9c2f28,0x1f5f4a,0x2c4b88,0xb5741e,0x6a2f6a,0xc9c4b8].map(
   c=>new THREE.MeshStandardMaterial({color:c,roughness:.9,metalness:.02}));
 const VEND_GLOW=[0xff3a3a,0x3aa0ff,0xffffff].map(c=>new THREE.MeshBasicMaterial({color:c}));
@@ -1929,6 +1966,147 @@ function parkRail(cx,cz,hx,hz){
   };
   run(hx,hz,'x',-1); run(hx,hz,'x',1);
   run(hz,hx,'z',-1); run(hz,hx,'z',1);
+}
+
+// ─── ARCADE CABINETS ─────────────────────────────────────────────────────────
+// A vertical cabinet running Pegasus in attract mode. An iframe cannot be
+// rendered into a WebGL texture — browsers never expose iframe pixels — so the
+// screen here is a looping video of the menu, and walking up and pressing E
+// opens the real game as an overlay. You sit down at the machine rather than
+// squinting at a live page on a tilted quad in the dark.
+const PEGASUS_URL='https://dannyrhubarb.github.io/pegasus/';
+const cabinets=[];
+let attractVideo=null,ATTRACT_MAT=null;
+const ATTRACT_ASPECT=384/772;                 // portrait, like a real vertical monitor
+
+function initAttract(){
+  const v=document.createElement('video');
+  v.muted=true; v.loop=true; v.playsInline=true; v.autoplay=true;
+  v.setAttribute('muted',''); v.setAttribute('playsinline','');
+  v.preload='auto';
+  [['media/pegasus_menu.mp4','video/mp4'],['media/pegasus_menu.webm','video/webm']]
+    .forEach(([src,type])=>{const s=document.createElement('source');s.src=src;s.type=type;v.appendChild(s);});
+  v.style.cssText='position:absolute;width:1px;height:1px;opacity:0;pointer-events:none';
+  document.body.appendChild(v);
+  attractVideo=v;
+  const tex=new THREE.VideoTexture(v);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  tex.minFilter=tex.magFilter=THREE.LinearFilter;
+  tex.generateMipmaps=false;
+  const poster=new THREE.TextureLoader().load('media/pegasus_menu_poster.jpg',
+    t=>{t.colorSpace=THREE.SRGBColorSpace;},undefined,()=>{});
+  ATTRACT_MAT=new THREE.MeshBasicMaterial({map:poster,toneMapped:false});
+  v.addEventListener('playing',()=>{ATTRACT_MAT.map=tex;ATTRACT_MAT.needsUpdate=true;},{once:true});
+  v.play().catch(()=>{});
+}
+function startAttract(){ if(attractVideo)attractVideo.play().catch(()=>{}); }
+
+// One cabinet, facing +z in local terms then rotated by ry
+function addCabinet(x,z,ry){
+  // This must match what three's rotateY(ry) does to a plane's +Z normal, which
+  // is (sin ry, 0, cos ry). The obvious 2D rotation sends +Z to (-sin ry, cos ry)
+  // instead, and a single-sided screen then faces backwards on any cabinet
+  // turned a quarter turn — invisible exactly where it matters.
+  const S=(gx,gy,gz)=>[x+Math.cos(ry)*gx+Math.sin(ry)*gz, gy, z-Math.sin(ry)*gx+Math.cos(ry)*gz];
+  const W=1.0,H=1.95,D=0.9;
+  let p=S(0,H/2,0);
+  addBox('CAB',CAB_MAT,W,H,D,p[0],p[1],p[2],ry);                   // body
+  p=S(0,H-0.16,0.02);
+  addBox('CABT',CAB_TRIM,W+.12,.3,D+.1,p[0],p[1],p[2],ry);          // marquee hood
+  p=S(0,0.52,D/2+0.10);
+  addBox('CABT',CAB_TRIM,W,.28,.42,p[0],p[1],p[2],ry);              // control deck
+  // joystick and buttons
+  p=S(-0.22,0.74,D/2+0.06);
+  place('Gr',GREEBLE_MAT,new THREE.CylinderGeometry(.035,.045,.20,6),p[0],p[1],p[2]);
+  place('CABB',CAB_BTN,new THREE.SphereGeometry(.055,8,6),p[0],p[1]+.11,p[2]);
+  for(let k=0;k<3;k++){
+    p=S(0.08+k*0.16,0.70,D/2+0.04+(k%2)*0.03);
+    place('CABB',CAB_BTN,new THREE.CylinderGeometry(.05,.05,.03,10),p[0],p[1],p[2]);
+  }
+  // The attract screen. D/2 is the front face, so anything at D/2 minus a margin
+  // is buried inside the cabinet; it has to sit proud of it. Height is derived
+  // from the video's own aspect so the portrait menu is not stretched.
+  const sh=1.02, sw=sh*ATTRACT_ASPECT;
+  // The bezel is a box, so it occupies depth: at D/2 it spans across the plane
+  // and hides it. Bezel sits back, screen sits proud of the bezel's front face.
+  p=S(0,1.30,D/2-0.01);
+  addBox('CABT',CAB_TRIM,sw+.14,sh+.14,.03,p[0],p[1],p[2],ry);
+  const g=new THREE.PlaneGeometry(sw,sh);
+  p=S(0,1.30,D/2+0.03);
+  place('ATTRACT',ATTRACT_MAT,g,p[0],p[1],p[2],ry);
+  // marquee glow and a pool of light on the floor
+  const si=Math.floor(Math.random()*STRIP_MATS.length);
+  p=S(0,H-0.05,D/2+0.02);
+  addBox('S'+si,STRIP_MATS[si],W*.8,.1,.06,p[0],p[1],p[2],ry);
+  lightPool(x,z,3.2,1);
+  addSolid(x,z,W+.4,D+.4);
+  cabinets.push({x,z,ry});
+}
+
+// Cabinets stand in the furniture strip, never in the reserved walking lane,
+// and spill onto the pavement the way a game centre does
+function addArcades(){
+  const B=PLAN.blocks.filter(b=>b.kind==='city');
+  B.forEach(b=>{
+    if(Math.random()>.30)return;
+    const side=Math.floor(Math.random()*4);
+    const n=1+Math.floor(Math.random()*3);
+    for(let k=0;k<n;k++){
+      const t=(k-(n-1)/2)*1.35;
+      let x,z,ry;
+      const ox=b.hx+FURN_OUT-0.7, oz=b.hz+FURN_OUT-0.7;
+      if(side===0){x=b.cx+t; z=b.cz-oz; ry=Math.PI;}
+      else if(side===1){x=b.cx+t; z=b.cz+oz; ry=0;}
+      else if(side===2){x=b.cx-ox; z=b.cz+t; ry=Math.PI/2;}
+      else             {x=b.cx+ox; z=b.cz+t; ry=-Math.PI/2;}
+      addCabinet(x,z,ry);
+    }
+  });
+  // a row of them on the plaza, as the arcade of the district
+  const pl=PLAN.blocks.find(b=>b.kind==='plaza');
+  if(pl)for(let k=0;k<5;k++)
+    addCabinet(pl.cx-3+k*1.5, pl.cz+pl.hz-3, Math.PI);
+}
+
+// ─── SITTING DOWN AT THE MACHINE ─────────────────────────────────────────────
+let arcadeOpen=false, nearCabinet=null;
+function nearestCabinet(){
+  let best=null,bd=3.6*3.6;
+  for(let i=0;i<cabinets.length;i++){
+    const c=cabinets[i];
+    const dx=c.x-P.pos.x, dz=c.z-P.pos.z;
+    const d=dx*dx+dz*dz;
+    if(d<bd){bd=d;best=c;}
+  }
+  return best;
+}
+function updateArcadePrompt(){
+  if(arcadeOpen)return;
+  const c=(P.mode==='foot')?nearestCabinet():null;
+  if(c!==nearCabinet){
+    nearCabinet=c;
+    document.getElementById('arcade-prompt').style.display=c?'block':'none';
+  }
+}
+function openArcade(){
+  if(arcadeOpen||!nearCabinet)return;
+  arcadeOpen=true;
+  document.getElementById('arcade-prompt').style.display='none';
+  const box=document.getElementById('arcade');
+  const f=document.getElementById('arcade-frame');
+  f.src=PEGASUS_URL;                      // loaded on demand, not at startup
+  box.style.display='flex';
+  if(document.exitPointerLock)document.exitPointerLock();
+  for(const k in K)K[k]=false;            // drop any held movement keys
+  JS.L.on=JS.R.on=false; JS.L.dx=JS.L.dy=JS.R.dx=JS.R.dy=0;
+}
+function closeArcade(){
+  if(!arcadeOpen)return;
+  arcadeOpen=false;
+  const box=document.getElementById('arcade');
+  box.style.display='none';
+  document.getElementById('arcade-frame').src='about:blank';  // stop its audio and rAF
+  nearCabinet=null;
 }
 
 // ─── SPECIAL BLOCKS ──────────────────────────────────────────────────────────
@@ -2608,6 +2786,9 @@ const HEIGHTS={foot:1.7,car:2.2};
 // ─── INPUT ───────────────────────────────────────────────────────────────────
 const K={};
 document.addEventListener('keydown',e=>{
+  if(e.code==='Escape'&&arcadeOpen){closeArcade();return;}
+  if(arcadeOpen)return;                       // the machine has the keyboard
+  if(e.code==='KeyE'&&nearCabinet){openArcade();return;}
   K[e.code]=true;
   if(e.code==='Digit1')setMode('foot');
   if(e.code==='Digit2')setMode('car');
@@ -2617,7 +2798,7 @@ document.addEventListener('keyup',e=>{K[e.code]=false});
 
 const IS_TOUCH='ontouchstart' in window||navigator.maxTouchPoints>0;
 let mdx=0,mdy=0,locked=false;
-canvas.addEventListener('click',()=>{if(!IS_TOUCH)canvas.requestPointerLock()});
+canvas.addEventListener('click',()=>{if(!IS_TOUCH&&!arcadeOpen)canvas.requestPointerLock()});
 document.addEventListener('pointerlockchange',()=>{locked=document.pointerLockElement===canvas});
 document.addEventListener('mousemove',e=>{if(locked){mdx+=e.movementX;mdy+=e.movementY}});
 
@@ -2727,6 +2908,7 @@ function drawMap(){
 
 // ─── UPDATE PLAYER ────────────────────────────────────────────────────────────
 function updatePlayer(dt){
+  if(arcadeOpen){camera.position.copy(P.pos);return;}
   // Look
   const MSENS=.0018, TSENS=2.2;
   if(locked){ P.yaw-=mdx*MSENS; P.pitch-=mdy*MSENS; }
@@ -2902,6 +3084,7 @@ async function init(){
       }
     })();
     initAdVideo();
+    initAttract();
     buildSignPools();
     setLoad(30,'CONSTRUCTING CITY...');
     for(let bi=0;bi<PLAN.blocks.length;bi++){
@@ -2911,6 +3094,7 @@ async function init(){
     }
     layRoads();
     addCampaign();
+    addArcades();
     setLoad(62,'EXTENDING SPRAWL...');       await tick(20);
     addOuterCity();
     setLoad(66,'RAISING SKYWAYS...');        await tick(20);
@@ -2937,11 +3121,15 @@ async function init(){
   }
 }
 
+document.getElementById('arcade-exit').addEventListener('click',closeArcade);
+document.getElementById('arcade-prompt').addEventListener('click',openArcade);
+document.getElementById('arcade-prompt').addEventListener('touchend',e=>{e.preventDefault();openArcade();});
 document.getElementById('enter-btn').addEventListener('click',startGame);
 document.getElementById('enter-btn').addEventListener('touchend',e=>{e.preventDefault();startGame();});
 
 function startGame(){
   startAdVideo();
+  startAttract();
   document.getElementById('load').style.transition='opacity .6s';
   document.getElementById('load').style.opacity='0';
   setTimeout(()=>document.getElementById('load').style.display='none',600);
@@ -2959,6 +3147,7 @@ function loop(now){
   updatePlayer(dt);
   updateNPCs(dt,t);
   updatePedestrians(dt,t);
+  updateArcadePrompt();
   updateRain(dt);
   updateAnim(t,dt);
   drawMap();
