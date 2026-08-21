@@ -1810,6 +1810,91 @@ function vacantLot(l){
         l.x+l.w/2-1.6,3.5,l.z-l.d/2+1.6);
 }
 
+// ─── VIDEO BILLBOARDS ────────────────────────────────────────────────────────
+// A "PLAY PEGASUS" campaign running on screens across the city. Every hoarding
+// shares one <video> and one VideoTexture, so the whole campaign is a single
+// draw call and every screen is naturally in sync — which is what a real ad
+// buy looks like anyway. Autoplay is only permitted while muted, so the video
+// is muted and playsinline, and playback is also kicked off from the ENTER
+// click because iOS wants a user gesture.
+let adVideo=null,adTex=null,AD_MAT=null,AD_POSTER=null;
+const AD_ASPECT=768/494;
+
+function initAdVideo(){
+  const v=document.createElement('video');
+  v.muted=true; v.loop=true; v.playsInline=true; v.autoplay=true;
+  v.setAttribute('muted',''); v.setAttribute('playsinline','');
+  v.preload='auto'; v.crossOrigin='anonymous';
+  const mp4=document.createElement('source');
+  mp4.src='media/pegasus.mp4'; mp4.type='video/mp4';
+  const webm=document.createElement('source');
+  webm.src='media/pegasus.webm'; webm.type='video/webm';
+  v.appendChild(mp4); v.appendChild(webm);
+  v.style.cssText='position:absolute;width:1px;height:1px;opacity:0;pointer-events:none';
+  document.body.appendChild(v);
+  adVideo=v;
+
+  adTex=new THREE.VideoTexture(v);
+  adTex.colorSpace=THREE.SRGBColorSpace;
+  adTex.minFilter=THREE.LinearFilter;
+  adTex.magFilter=THREE.LinearFilter;
+  adTex.generateMipmaps=false;
+
+  // A still of the same ad stands in until the video has decoded a frame, so a
+  // hoarding is never a blank white rectangle.
+  AD_POSTER=new THREE.TextureLoader().load('media/pegasus_poster.jpg',t=>{
+    t.colorSpace=THREE.SRGBColorSpace;
+  },undefined,()=>{});
+  AD_MAT=new THREE.MeshBasicMaterial({map:AD_POSTER,toneMapped:false});
+  v.addEventListener('playing',()=>{ AD_MAT.map=adTex; AD_MAT.needsUpdate=true; },{once:true});
+  v.play().catch(()=>{});   // may be refused until a gesture; ENTER retries
+}
+function startAdVideo(){ if(adVideo)adVideo.play().catch(()=>{}); }
+
+// One hoarding: screen, bezel, and a lit strip along the bottom
+function addBillboard(x,y,z,ry,w){
+  const h=w/AD_ASPECT;
+  const g=new THREE.PlaneGeometry(w,h);
+  place('AD',AD_MAT,g,x,y,z,ry);
+  const n=[Math.sin(ry),Math.cos(ry)];          // facing direction
+  const bx=x-n[0]*0.25, bz=z-n[1]*0.25;
+  addBox('C3',CONC_MATS[3],w+1.6,h+1.6,.5,bx,y,bz,ry);
+  const si=Math.floor(Math.random()*STRIP_MATS.length);
+  addBox('S'+si,STRIP_MATS[si],w+1.6,.35,.7,x-n[0]*.1,y-h/2-.9,z-n[1]*.1,ry);
+  // gantry legs when it stands clear of a wall
+  return {w,h};
+}
+
+// Hoardings go up facing the streets, on building flanks and above the shops
+function addCampaign(){
+  const B=PLAN.blocks.filter(b=>b.kind==='city');
+  let placed=0;
+  B.forEach(b=>{
+    if(Math.random()>.45)return;
+    const side=Math.floor(Math.random()*4);
+    const w=rnd(14,26), h=w/AD_ASPECT;
+    const y=rnd(16,34);
+    let x,z,ry;
+    const ox=b.hx+SHOP_OUT+0.5, oz=b.hz+SHOP_OUT+0.5;
+    if(side===0){x=b.cx+rnd(-.5,.5)*b.hx; z=b.cz-oz; ry=Math.PI;}
+    else if(side===1){x=b.cx+rnd(-.5,.5)*b.hx; z=b.cz+oz; ry=0;}
+    else if(side===2){x=b.cx-ox; z=b.cz+rnd(-.5,.5)*b.hz; ry=Math.PI/2;}
+    else             {x=b.cx+ox; z=b.cz+rnd(-.5,.5)*b.hz; ry=-Math.PI/2;}
+    addBillboard(x,y,z,ry,w);
+    lightPool(x,z,w*.5,1);
+    placed++;
+  });
+  // a pair of large ones over the plaza and beside the landmark, so the campaign
+  // reads as citywide rather than incidental
+  const special=PLAN.blocks.filter(b=>b.kind==='plaza'||b.kind==='landmark');
+  special.forEach(b=>{
+    const w=46;
+    addBillboard(b.cx,52,b.cz-b.hz-SHOP_OUT-1,Math.PI,w);
+    placed++;
+  });
+  return placed;
+}
+
 // ─── SPECIAL BLOCKS ──────────────────────────────────────────────────────────
 // A circular plaza: a ring of shops facing inward around an open circle with a
 // monument at the centre. The one genuinely round block in the city.
@@ -2740,6 +2825,7 @@ async function init(){
         P.pos.set(xr.off[j],P.pos.y,zr.off[i]);
       }
     })();
+    initAdVideo();
     buildSignPools();
     setLoad(30,'CONSTRUCTING CITY...');
     for(let bi=0;bi<PLAN.blocks.length;bi++){
@@ -2748,6 +2834,7 @@ async function init(){
       if(gx%3===0){setLoad(30+gx*4,'CONSTRUCTING CITY...'); await tick(10);}
     }
     layRoads();
+    addCampaign();
     setLoad(62,'EXTENDING SPRAWL...');       await tick(20);
     addOuterCity();
     setLoad(66,'RAISING SKYWAYS...');        await tick(20);
@@ -2778,6 +2865,7 @@ document.getElementById('enter-btn').addEventListener('click',startGame);
 document.getElementById('enter-btn').addEventListener('touchend',e=>{e.preventDefault();startGame();});
 
 function startGame(){
+  startAdVideo();
   document.getElementById('load').style.transition='opacity .6s';
   document.getElementById('load').style.opacity='0';
   setTimeout(()=>document.getElementById('load').style.display='none',600);
